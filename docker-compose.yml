@@ -1,0 +1,12 @@
+services:
+  paylocity-auto-clock:
+    build: .
+    container_name: paylocity-auto-clock
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data.db:/app/data.db
+      - ./screenshots:/app/screenshots
+    environment:
+      - TZ=Asia/Bangkok
