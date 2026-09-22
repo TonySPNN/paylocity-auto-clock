@@ -33,6 +33,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
     logger.info(f"Starting punch workflow for {action} (History ID: {history_id})")
 
+    # แจ้งเตือนสเต็ปที่ 1 เข้า LINE ทันทีที่เริ่มงาน
+    send_line_message(f"🚀 [Paylocity] เริ่มกระบวนการลงเวลา {action_th} แล้ว!\nระบบกำลังเปิดหน้าเว็บและเข้าสู่ระบบ SSO ให้ครับ...")
+
     # อ่านค่าการตั้งค่าจาก SQLite
     paylocity_url = get_setting("paylocity_url", "https://access.paylocity.com/").strip()
     company_id = get_setting("company_id", "").strip()
@@ -40,10 +43,10 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
     password = get_setting("password", "").strip()
 
     if not username or not password:
-        err_msg = "ยังไม่ได้ระบุ Username หรือ Password ในเมนู Settings"
+        err_msg = "ยังไม่ได้ระบุ Email หรือ Password ในเมนู Settings"
         logger.error(err_msg)
         update_history(history_id, "failed", err_msg)
-        send_line_message(f"❌ ลงเวลา {action_th} ไม่สำเร็จ: {err_msg}")
+        send_line_message(f"❌ [Paylocity] ลงเวลา {action_th} ไม่สำเร็จ: {err_msg}")
         return {"success": False, "message": err_msg}
 
     # นำเข้า Playwright
@@ -165,12 +168,15 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 await asyncio.sleep(2)
 
             # Step 6: เข้าสู่หน้า Duo Security 2FA
-            logger.info("Step 6: Duo 2FA stage reached - triggering phone call and LINE alert...")
-            make_voice_call(action_text="เข้างาน" if action == "clock_in" else "ออกงาน")
+            logger.info("Step 6: Duo 2FA stage reached - sending LINE alert...")
+            # ส่งสายโทรเฉพาะเมื่อเปิดใช้งานใน Settings
+            if get_setting("voice_call_enabled", "0") == "1":
+                make_voice_call(action_text="เข้างาน" if action == "clock_in" else "ออกงาน")
+
+            # ส่งข้อความเตือนให้กด Duo เข้า LINE ทันที
             send_line_message(
-                f"⏰ ถึงเวลาลงเวลา {action_th} แล้ว!\n"
-                "ระบบกำลังเชื่อมต่อ Paylocity...\n"
-                "👉 กรุณาเปิดแอป Duo บนมือถือ แล้วแตะ 'Approve / ติ๊กถูก' ได้เลยครับ"
+                f"🔔 [Paylocity] กรอกรหัส SSO เรียบร้อยแล้ว!\n"
+                f"👉 กรุณาเปิดแอป Duo บนมือถือของคุณ แล้วกด 'Approve / ติ๊กถูก' ได้เลยครับ (ระบบกำลังรออยู่)"
             )
 
             # ตรวจสอบหาปุ่ม Send Push ของ Duo เผื่อระบบไม่ได้ส่งอัตโนมัติ
@@ -207,6 +213,8 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 if "escher" in current_url.lower() or "login.paylocity.com" in current_url.lower() or "punch" in current_url.lower() or "portal" in current_url.lower() or "workforce" in current_url.lower():
                     approved = True
                     logger.info("Duo approval detected! Redirecting to Paylocity portal.")
+                    # แจ้งเตือนใน LINE ว่าได้รับ Approve แล้ว
+                    send_line_message(f"👍 [Paylocity] ตรวจพบการ Approve จาก Duo แล้ว!\nกำลังเข้าสู่หน้าหลักเพื่อกดลงเวลา {action_th}...")
                     break
                 await asyncio.sleep(3)
 

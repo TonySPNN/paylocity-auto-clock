@@ -13,6 +13,7 @@ import database
 import scheduler
 import paylocity_bot
 import voice_caller
+import line_service
 import calendar_export
 
 # Lifespan
@@ -136,6 +137,12 @@ async def api_trigger_punch(punch: PunchIn, background_tasks: BackgroundTasks):
 @app.post("/api/test-call")
 async def api_test_call():
     result = voice_caller.make_voice_call(action_text="เข้างาน (ทดสอบระบบ)")
+    return result
+
+# API Routes: Test LINE Message
+@app.post("/api/test-line")
+async def api_test_line():
+    result = line_service.send_line_message("🔔 ทดสอบการแจ้งเตือนจาก Paylocity Auto Clock! ระบบเชื่อมต่อ LINE สำเร็จเรียบร้อยครับ 🎉")
     return result
 
 # API Routes: Export Google Calendar .ics

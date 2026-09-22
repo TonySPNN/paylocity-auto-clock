@@ -73,19 +73,19 @@
         </button>
       </div>
 
-      <!-- Test Call & Calendar -->
+      <!-- Test LINE & Calendar -->
       <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center space-x-2">
-            <span class="p-2 bg-blue-100 text-blue-600 rounded-lg"><i class="fa-solid fa-phone-volume text-lg"></i></span>
-            <span class="font-bold text-slate-700">ทดสอบเสียง & ปฏิทิน</span>
+            <span class="p-2 bg-emerald-100 text-emerald-600 rounded-lg"><i class="fa-brands fa-line text-xl"></i></span>
+            <span class="font-bold text-slate-700">แจ้งเตือน & ปฏิทิน</span>
           </div>
           <span class="text-xs text-slate-400">Utilities</span>
         </div>
         <div class="space-y-2 mb-4">
-          <button onclick="testPhoneCall()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition">
-            <i class="fa-solid fa-phone text-blue-600"></i>
-            <span>ทดสอบโทรเข้าเบอร์มือถือ</span>
+          <button onclick="testLineMessage()" class="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition border border-emerald-200">
+            <i class="fa-brands fa-line text-base text-emerald-600"></i>
+            <span>ทดสอบส่งข้อความเข้า LINE</span>
           </button>
           <a href="/api/calendar/export" download="paylocity_schedule.ics" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition">
             <i class="fa-solid fa-calendar-days text-indigo-600"></i>
@@ -93,7 +93,7 @@
           </a>
         </div>
         <div class="text-[11px] text-slate-400 text-center">
-          ระบบจะโทรเข้าเบอร์ที่ตั้งไว้เมื่อถึงเวลากด Duo
+          บอทจะส่งข้อความเตือนเข้า LINE เมื่อถึงเวลากด Duo
         </div>
       </div>
     </div>
@@ -270,58 +270,67 @@
           </div>
         </div>
 
-        <!-- Twilio Phone Call Section -->
-        <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
+        <!-- LINE Messaging API Section (ระบบแจ้งเตือนหลัก) -->
+        <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/40 space-y-3">
           <div class="flex items-center justify-between">
-            <h4 class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center space-x-1.5">
-              <i class="fa-solid fa-phone text-blue-600"></i>
-              <span>โทรเข้ามือถือเมื่อถึงเวลากด Duo (Twilio)</span>
+            <h4 class="text-xs font-bold uppercase text-emerald-800 tracking-wider flex items-center space-x-1.5">
+              <i class="fa-brands fa-line text-emerald-600 text-lg"></i>
+              <span>ระบบแจ้งเตือนผ่าน LINE (แนะนำ)</span>
             </h4>
             <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="set-voice_call_enabled" class="sr-only peer">
-              <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-            </label>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">เบอร์โทรศัพท์ของคุณ (ต้องใส่รหัสประเทศ +66)</label>
-            <input type="text" id="set-phone_number" placeholder="+66812345678" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs">
-          </div>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio Account SID</label>
-              <input type="text" id="set-twilio_account_sid" placeholder="ACxxxxxxxx" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio Auth Token</label>
-              <input type="password" id="set-twilio_auth_token" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio From Number</label>
-            <input type="text" id="set-twilio_from_number" placeholder="+1234567890" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
-          </div>
-        </div>
-
-        <!-- LINE Messaging API Section -->
-        <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
-          <div class="flex items-center justify-between">
-            <h4 class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center space-x-1.5">
-              <i class="fa-brands fa-line text-emerald-600 text-base"></i>
-              <span>แจ้งเตือนผ่าน LINE Official Account</span>
-            </h4>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="set-line_enabled" class="sr-only peer">
+              <input type="checkbox" id="set-line_enabled" checked class="sr-only peer">
               <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
             </label>
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-700 mb-1">LINE Channel Access Token</label>
-            <input type="password" id="set-line_channel_access_token" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
+            <input type="password" id="set-line_channel_access_token" placeholder="วาง Channel Access Token จาก LINE Developers" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-700 mb-1">LINE User ID (ของคุณ)</label>
-            <input type="text" id="set-line_user_id" placeholder="Uxxxxxxxx..." class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
+            <input type="text" id="set-line_user_id" placeholder="Uxxxxxxxx... จากแท็บ Basic Settings" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
+            <p class="text-[11px] text-slate-500 mt-1">บอทจะส่งข้อความบอกทุกสเต็ป: กำลังล็อกอิน ➡️ เตือนให้กด Duo ➡️ ยืนยันผลพร้อมรูปถ่าย</p>
           </div>
+        </div>
+
+        <!-- Twilio Phone Call Section (ตัวเลือกเสริม ซ่อนไว้) -->
+        <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+          <details class="text-xs">
+            <summary class="cursor-pointer font-semibold text-slate-600 hover:text-indigo-600 flex items-center justify-between">
+              <span class="flex items-center space-x-1.5">
+                <i class="fa-solid fa-phone text-blue-500"></i>
+                <span>ตัวเลือกเสริม: ระบบโทรเข้าเบอร์มือถือ (Twilio Voice)</span>
+              </span>
+              <span class="text-[10px] text-slate-400">ปิดไว้เป็นค่าเริ่มต้น (ไม่จำเป็น)</span>
+            </summary>
+            <div class="mt-3 space-y-3 pt-2 border-t border-slate-200">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-600">เปิดใช้งานระบบโทรเข้ามือถือ</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-voice_call_enabled" class="sr-only peer">
+                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">เบอร์โทรศัพท์ของคุณ (+66...)</label>
+                <input type="text" id="set-phone_number" placeholder="+66812345678" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs">
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio Account SID</label>
+                  <input type="text" id="set-twilio_account_sid" placeholder="ACxxxxxxxx" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio Auth Token</label>
+                  <input type="password" id="set-twilio_auth_token" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio From Number</label>
+                <input type="text" id="set-twilio_from_number" placeholder="+1234567890" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
+              </div>
+            </div>
+          </details>
         </div>
 
         <div class="pt-2 flex space-x-2">
@@ -481,6 +490,16 @@
         const res = await fetch('/api/test-call', { method: 'POST' });
         const data = await res.json();
         alert(data.message);
+      } catch (e) {
+        alert('เกิดข้อผิดพลาด: ' + e.message);
+      }
+    }
+
+    async function testLineMessage() {
+      try {
+        const res = await fetch('/api/test-line', { method: 'POST' });
+        const data = await res.json();
+        alert(data.message || 'ส่งข้อความทดสอบเข้า LINE เรียบร้อยแล้ว');
       } catch (e) {
         alert('เกิดข้อผิดพลาด: ' + e.message);
       }

@@ -56,7 +56,7 @@ def init_db():
             "username": "",
             "password": "",
             "phone_number": "",              # e.g. +66812345678
-            "voice_call_enabled": "1",
+            "voice_call_enabled": "0",
             "twilio_account_sid": "",
             "twilio_auth_token": "",
             "twilio_from_number": "",        # e.g. +1...
