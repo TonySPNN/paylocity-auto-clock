@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import logging
 import asyncio
@@ -296,7 +297,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
         )
         browser_config = get_browser_context_config(browser_profile)
         context = await browser.new_context(
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1440, "height": 900},
             user_agent=browser_config["user_agent"],
             extra_http_headers=browser_config["extra_http_headers"],
             locale="en-US",
@@ -481,9 +482,12 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                     pass
 
                 # ถ้าหลุดออกจากหน้า access.paylocity.com/duo หรือเข้าสู่ dashboard/portal แล้ว
-                if "escher" in current_url.lower() or "login.paylocity.com" in current_url.lower() or "punch" in current_url.lower() or "portal" in current_url.lower() or "workforce" in current_url.lower():
+                is_portal_url = any(k in current_url.lower() for k in ["go.paylocity.com", "escher", "login.paylocity.com", "punch", "portal", "workforce"])
+                is_post_duo = ("paylocity.com" in current_url.lower() and "duo" not in current_url.lower() and "sso" not in current_url.lower() and "login." not in current_url.lower())
+
+                if is_portal_url or is_post_duo:
                     approved = True
-                    logger.info("Duo approval detected! Redirecting to Paylocity portal.")
+                    logger.info(f"Duo approval detected! URL is {current_url}. Redirecting to Paylocity portal.")
                     await record_step(history_id, page, f"[สเต็ป 7/7] 👍 ตรวจพบการ Approve จาก Duo แล้ว! กำลังเข้าสู่หน้าหลักเพื่อลงเวลา {action_th}...", take_screenshot=True)
                     # แจ้งเตือนใน LINE ว่าได้รับ Approve แล้ว
                     send_line_message(f"👍 [Paylocity] ตรวจพบการ Approve จาก Duo แล้ว!\nกำลังเข้าสู่หน้าหลักเพื่อกดลงเวลา {action_th}...")
@@ -503,7 +507,12 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             # Step 8: รอให้หน้าหลัก Paylocity โหลดเสร็จสมบูรณ์
             logger.info("Step 8: Waiting for Paylocity main dashboard to load...")
             await record_step(history_id, page, "[สเต็ป 7/7] กำลังโหลดหน้าหลัก Paylocity Dashboard...", take_screenshot=True)
-            await asyncio.sleep(5)
+            
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+            await asyncio.sleep(4)
 
             # ตรวจสอบเผื่อมี prompt ตกค้างหรือ popup ข้ามในหน้าหลัก
             try:
@@ -513,105 +522,239 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
             post_login_skip = page.locator("button:has-text('Remind me later'), button:has-text('Dismiss'), button:has-text('Not now'), button:has-text('Close'), [aria-label='Close' i]")
             if await post_login_skip.count() > 0 and await post_login_skip.first.is_visible():
-                await post_login_skip.first.click()
-                await asyncio.sleep(2)
+                try:
+                    await post_login_skip.first.click()
+                    await asyncio.sleep(2)
+                except Exception:
+                    pass
 
-            # Step 9: เลื่อนหน้าจอหาปุ่ม Clock In หรือ Clock Out
-            logger.info(f"Step 9: Scrolling and looking for {action} button...")
-            await record_step(history_id, page, f"[สเต็ป 7/7] กำลังเลื่อนหน้าจอค้นหาปุ่มลงเวลา {action_th}...", take_screenshot=True)
-            # เลื่อนหน้าจอลงเล็กน้อยเพื่อให้เห็นวิดเจ็ตลงเวลา
-            await page.evaluate("window.scrollTo(0, 300)")
-            await asyncio.sleep(1)
+            # Step 9: เลื่อนหน้าจอไปยังการ์ด Time และค้นหาปุ่ม Clock in / Clock out
+            logger.info(f"Step 9: Scrolling and looking for {action} button in Time widget...")
+            await record_step(history_id, page, f"[สเต็ป 7/7] เลื่อนหน้าจอไปยังการ์ด Time เพื่อค้นหาปุ่ม {action_th}...", take_screenshot=True)
+            
+            # เลื่อนหน้าจอลงเล็กน้อยเพื่อให้เห็นวิดเจ็ตลงเวลา Time ทางขวา
+            await page.evaluate("window.scrollTo(0, 320)")
+            await asyncio.sleep(2)
 
+            # กำหนดคำค้นหาเป้าหมายและคำตรงข้าม
             if action == "clock_in":
-                punch_selectors = [
-                    "button:has-text('Clock In')",
-                    "a:has-text('Clock In')",
-                    "button:has-text('Clock-In')",
-                    "a:has-text('Clock-In')",
-                    "button:has-text('Clock-in')",
-                    "a:has-text('Clock-in')",
-                    "[aria-label*='Clock In' i]",
-                    "[aria-label*='Clock-In' i]",
-                    "[title*='Clock In' i]",
-                    "text=Clock In",
-                    "text=Clock-In"
-                ]
+                target_text = "Clock in"
+                opp_text = "Clock out"
+                target_re = re.compile(r"^Clock\s*in$", re.I)
+                opp_re = re.compile(r"^Clock\s*out$", re.I)
             else:
-                punch_selectors = [
-                    "button:has-text('Clock Out')",
-                    "a:has-text('Clock Out')",
-                    "button:has-text('Clock-Out')",
-                    "a:has-text('Clock-Out')",
-                    "button:has-text('Clock-out')",
-                    "a:has-text('Clock-out')",
-                    "[aria-label*='Clock Out' i]",
-                    "[aria-label*='Clock-Out' i]",
-                    "[title*='Clock Out' i]",
-                    "text=Clock Out",
-                    "text=Clock-Out"
-                ]
+                target_text = "Clock out"
+                opp_text = "Clock in"
+                target_re = re.compile(r"^Clock\s*out$", re.I)
+                opp_re = re.compile(r"^Clock\s*in$", re.I)
 
             button_found = False
-            for sel in punch_selectors:
-                loc = page.locator(sel)
-                if await loc.count() > 0 and await loc.first.is_visible():
-                    logger.info(f"Found {action} button with selector '{sel}', clicking...")
-                    await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {action_th} แล้ว กำลังคลิกลงเวลา...", take_screenshot=True)
-                    await loc.first.scroll_into_view_if_needed()
-                    await loc.first.click()
+            already_punched = False
+            clicked_btn_text = ""
+
+            # วนลูปตรวจสอบสูงสุด 20 วินาทีเพื่อให้เวลาหน้าเว็บโหลดและเรนเดอร์ข้อมูลการ์ด Time
+            search_start = time.time()
+            while time.time() - search_start < 20:
+                # 1. ค้นหาด้วย Playwright get_by_role (ดีที่สุดสำหรับ Accessible Web Component)
+                target_btn = page.get_by_role("button", name=target_re)
+                if await target_btn.count() > 0 and await target_btn.first.is_visible():
+                    logger.info(f"Found target button '{target_text}' via get_by_role, clicking...")
+                    await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} ในการ์ด Time แล้ว กำลังคลิก...", take_screenshot=True)
+                    await target_btn.first.scroll_into_view_if_needed()
+                    await asyncio.sleep(0.5)
+                    await target_btn.first.click()
                     button_found = True
+                    clicked_btn_text = target_text
                     break
 
-            if not button_found:
-                # ลองเลื่อนต่ออีกนิด
-                await page.evaluate("window.scrollTo(0, 600)")
-                await asyncio.sleep(1)
-                for sel in punch_selectors:
+                # 2. ค้นหาด้วย Selector ข้อความและ Attribute
+                selectors = [
+                    f"button:has-text('{target_text}')",
+                    f"[role='button']:has-text('{target_text}')",
+                    f"button:has-text('{target_text.title()}')",
+                    f"[role='button']:has-text('{target_text.title()}')",
+                    f"[aria-label*='{target_text}' i]"
+                ]
+                for sel in selectors:
                     loc = page.locator(sel)
                     if await loc.count() > 0 and await loc.first.is_visible():
-                        logger.info(f"Found {action} button after scroll with selector '{sel}', clicking...")
-                        await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {action_th} แล้ว กำลังคลิกลงเวลา...", take_screenshot=True)
+                        logger.info(f"Found target button with selector '{sel}', clicking...")
+                        await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} แล้ว กำลังคลิก...", take_screenshot=True)
                         await loc.first.scroll_into_view_if_needed()
+                        await asyncio.sleep(0.5)
                         await loc.first.click()
                         button_found = True
+                        clicked_btn_text = target_text
+                        break
+                if button_found:
+                    break
+
+                # 3. ค้นหาปุ่มที่อยู่ก่อนหน้าปุ่ม 'More' ในการ์ด Time
+                try:
+                    more_btn = page.locator("button:has-text('More'), [role='button']:has-text('More')")
+                    if await more_btn.count() > 0 and await more_btn.first.is_visible():
+                        sibling_btn = more_btn.first.locator("xpath=preceding-sibling::button[1] | preceding-sibling::*[@role='button'][1]")
+                        if await sibling_btn.count() > 0 and await sibling_btn.first.is_visible():
+                            sib_text = (await sibling_btn.first.inner_text()).strip()
+                            if target_re.match(sib_text):
+                                logger.info(f"Found target button '{sib_text}' next to 'More', clicking...")
+                                await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {sib_text} ข้างปุ่ม More กำลังคลิก...", take_screenshot=True)
+                                await sibling_btn.first.click()
+                                button_found = True
+                                clicked_btn_text = sib_text
+                                break
+                            elif opp_re.match(sib_text):
+                                logger.info(f"Found opposite button '{sib_text}' next to 'More'. User is already punched.")
+                                already_punched = True
+                                clicked_btn_text = sib_text
+                                break
+                except Exception as e:
+                    logger.debug(f"Note on More sibling search: {e}")
+
+                if already_punched:
+                    break
+
+                # 4. ตรวจสอบว่าปุ่มตรงข้ามแสดงอยู่แล้วหรือไม่ (เช่น ขอ Clock In แต่ปุ่มเป็น Clock Out แปลว่าเข้างานอยู่แล้ว)
+                opp_btn = page.get_by_role("button", name=opp_re)
+                if await opp_btn.count() > 0 and await opp_btn.first.is_visible():
+                    logger.info(f"Detected opposite button '{opp_text}' is already visible! User is already in requested state.")
+                    already_punched = True
+                    clicked_btn_text = opp_text
+                    break
+
+                # 5. ค้นหาผ่านทุก Frame (เผื่อเป็น iframe)
+                for frame in page.frames:
+                    if frame == page.main_frame:
+                        continue
+                    try:
+                        f_btn = frame.get_by_role("button", name=target_re)
+                        if await f_btn.count() > 0 and await f_btn.first.is_visible():
+                            logger.info(f"Found target button in iframe, clicking...")
+                            await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} ในเฟรม กำลังคลิก...", take_screenshot=True)
+                            await f_btn.first.click()
+                            button_found = True
+                            clicked_btn_text = target_text
+                            break
+                    except Exception:
+                        pass
+                if button_found:
+                    break
+
+                await asyncio.sleep(1.5)
+
+            # 6. Fallback: JavaScript DOM Traverser (รองรับ Shadow DOM และ Custom Web Components)
+            if not button_found and not already_punched:
+                logger.info("Trying JavaScript DOM traverser fallback...")
+                try:
+                    js_script = """
+                        (targetAction) => {
+                            function queryAll(selector, root = document) {
+                                let results = Array.from(root.querySelectorAll(selector));
+                                const allNodes = root.querySelectorAll('*');
+                                for (const node of allNodes) {
+                                    if (node.shadowRoot) {
+                                        results = results.concat(queryAll(selector, node.shadowRoot));
+                                    }
+                                }
+                                return results;
+                            }
+                            const targetRegex = targetAction === 'clock_in' ? /^Clock\\s*in$/i : /^Clock\\s*out$/i;
+                            const oppRegex = targetAction === 'clock_in' ? /^Clock\\s*out$/i : /^Clock\\s*in$/i;
+                            const clickables = queryAll('button, [role="button"], a, span, div');
+                            for (const el of clickables) {
+                                const txt = (el.innerText || el.textContent || '').trim();
+                                if (targetRegex.test(txt)) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    const target = el.closest('button, [role="button"]') || el;
+                                    target.click();
+                                    return { found: true, clicked: true, text: txt };
+                                }
+                            }
+                            for (const el of clickables) {
+                                const txt = (el.innerText || el.textContent || '').trim();
+                                if (oppRegex.test(txt)) {
+                                    return { found: true, already: true, text: txt };
+                                }
+                            }
+                            return { found: false };
+                        }
+                    """
+                    js_res = await page.evaluate(js_script, action)
+                    if js_res and js_res.get("clicked"):
+                        button_found = True
+                        clicked_btn_text = js_res.get("text", target_text)
+                        logger.info(f"JS fallback clicked '{clicked_btn_text}' successfully!")
+                    elif js_res and js_res.get("already"):
+                        already_punched = True
+                        clicked_btn_text = js_res.get("text", opp_text)
+                        logger.info(f"JS fallback detected already punched ('{clicked_btn_text}')!")
+                except Exception as e:
+                    logger.debug(f"JS fallback error: {e}")
+
+            # ตรวจสอบหน้าต่างยืนยัน (Confirmation modal/dialog ถ้ามี)
+            if button_found:
+                await asyncio.sleep(2)
+                confirm_selectors = [
+                    "button:has-text('Submit')",
+                    "button:has-text('Confirm')",
+                    "button:has-text('Yes')",
+                    "button:has-text('OK')",
+                    "button:has-text('Save')",
+                    "button:has-text('Punch')"
+                ]
+                for c_sel in confirm_selectors:
+                    c_loc = page.locator(c_sel)
+                    if await c_loc.count() > 0 and await c_loc.first.is_visible():
+                        logger.info(f"Found confirmation dialog button '{c_sel}', clicking...")
+                        await c_loc.first.click()
+                        await asyncio.sleep(2)
                         break
 
-            if not button_found:
-                # ลองค้นหาปุ่ม Punch ทั่วไป
-                generic_punch = page.locator("button:has-text('Punch'), [aria-label*='Punch' i], [data-testid*='punch' i]")
-                if await generic_punch.count() > 0 and await generic_punch.first.is_visible():
-                    logger.info("Found generic Punch button, clicking...")
-                    await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม Punch กำลังคลิกลงเวลา...", take_screenshot=True)
-                    await generic_punch.first.click()
-                    button_found = True
+            # รอ 3-4 วินาทีให้ระบบ Paylocity บันทึกและอัปเดตสถานะ
+            await asyncio.sleep(3)
 
-            await asyncio.sleep(4)
+            # ตรวจสอบการสลับของปุ่มเพื่อยืนยันผล 100%
+            verified_toggle = False
+            if button_found:
+                try:
+                    opp_check = page.get_by_role("button", name=opp_re)
+                    if await opp_check.count() > 0 and await opp_check.first.is_visible():
+                        verified_toggle = True
+                        logger.info(f"Verified: Button successfully toggled to '{opp_text}'!")
+                except Exception:
+                    pass
 
-            # 5. ถ่ายภาพหน้าจอ (Screenshot) บันทึกหลักฐาน
+            # ถ่ายภาพหน้าจอ (Screenshot) บันทึกหลักฐานผลลัพธ์
             await page.screenshot(path=screenshot_path, full_page=False)
-            logger.info(f"Screenshot saved to {screenshot_path}")
+            logger.info(f"Final screenshot saved to {screenshot_path}")
 
             now_str = datetime.now().strftime("%H:%M:%S (%d/%m/%Y)")
             if button_found:
-                success_msg = f"🎉 ลงเวลา {action_th} สำเร็จเรียบร้อยเมื่อ {now_str}"
+                if verified_toggle:
+                    success_msg = f"🎉 ลงเวลา {action_th} สำเร็จ 100%! (ปุ่มสลับเป็น {opp_text} เรียบร้อย) เมื่อ {now_str}"
+                else:
+                    success_msg = f"🎉 กดปุ่ม {action_th} เรียบร้อยเมื่อ {now_str}"
+                status = "success"
+            elif already_punched:
+                opp_status_th = "เข้างาน (Clocked in)" if action == "clock_in" else "ออกงาน (Clocked out)"
+                success_msg = f"ℹ️ คุณอยู่ในสถานะ {opp_status_th} อยู่แล้ว (ปุ่มบนหน้าเว็บเป็น '{clicked_btn_text}') จึงไม่จำเป็นต้องกดซ้ำ เมื่อ {now_str}"
                 status = "success"
             else:
-                success_msg = f"⚠️ เข้าสู่ระบบได้สำเร็จ แต่ไม่พบปุ่ม {action_th} อัตโนมัติ (บันทึกภาพหน้าจอไว้ให้ตรวจสอบ)"
+                success_msg = f"⚠️ เข้าสู่ระบบได้สำเร็จ แต่ไม่พบบาร์ลงเวลา {action_th} อัตโนมัติ (บันทึกภาพหน้าจอไว้ให้ตรวจสอบ)"
                 status = "warning"
 
             update_history(history_id, status, success_msg, f"/screenshots/{screenshot_filename}")
             
             # ส่งแจ้งเตือนสรุปผลเข้า LINE
             send_line_message(
-                f"✅ {action_th} เรียบร้อยแล้ว!\n"
-                f"⏰ เวลา: {now_str}\n"
-                f"📌 สถานะ: {success_msg}"
+                f"✅ รายงานผล Paylocity\n"
+                f"📌 {success_msg}\n"
+                f"⏰ เวลา: {now_str}"
             )
             send_line_image(screenshot_path)
 
             await browser.close()
-            return {"success": True, "message": success_msg, "screenshot": f"/screenshots/{screenshot_filename}"}
+            return {"success": (status == "success"), "message": success_msg, "screenshot": f"/screenshots/{screenshot_filename}"}
 
         except Exception as e:
             logger.exception(f"Error during bot execution: {e}")
