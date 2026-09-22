@@ -60,10 +60,22 @@ def init_db():
                 status_message TEXT,
                 last_message TEXT,
                 last_message_at TEXT,
+                latest_reply_token TEXT,
+                latest_reply_time TEXT,
                 unread_count INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL
             )
         """)
+
+        # Migration: ensure latest_reply_token exists in existing databases
+        try:
+            cursor.execute("ALTER TABLE line_chats ADD COLUMN latest_reply_token TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE line_chats ADD COLUMN latest_reply_time TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         # 5. LINE Messages History Table
         cursor.execute("""
@@ -108,7 +120,11 @@ def init_db():
             "line_channel_secret": "",
             "line_channel_access_token": "",
             "line_user_id": "",
-            "timezone": "Asia/Bangkok"
+            "timezone": "Asia/Bangkok",
+            "gemini_api_keys": "",
+            "gemini_model": "gemini-1.5-flash",
+            "ai_reply_enabled": "1",
+            "ai_system_prompt": "คุณคือผู้ช่วย AI บริการลูกค้าของบริษัทที่คอยดูแลตอบแชททาง LINE Official Account ตอบคำถามลูกค้าด้วยภาษาไทยที่สุภาพ เป็นมิตร กระชับ ชัดเจน และเป็นธรรมชาติเหมือนพนักงานตอบเอง"
         }
         
         for k, v in default_settings.items():
@@ -221,18 +237,21 @@ def get_histories(limit: int = 50) -> List[Dict[str, Any]]:
 
 # LINE Chat & Message Helpers
 def upsert_line_chat(source_type: str, source_id: str, display_name: Optional[str] = None,
-                     picture_url: Optional[str] = None, status_message: Optional[str] = None):
+                     picture_url: Optional[str] = None, status_message: Optional[str] = None,
+                     reply_token: Optional[str] = None):
     now = datetime.now().isoformat()
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO line_chats (source_type, source_id, display_name, picture_url, status_message, created_at, last_message_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO line_chats (source_type, source_id, display_name, picture_url, status_message, created_at, last_message_at, latest_reply_token, latest_reply_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source_id) DO UPDATE SET
                 display_name = COALESCE(excluded.display_name, line_chats.display_name),
                 picture_url = COALESCE(excluded.picture_url, line_chats.picture_url),
-                status_message = COALESCE(excluded.status_message, line_chats.status_message)
-        """, (source_type, source_id, display_name, picture_url, status_message, now, now))
+                status_message = COALESCE(excluded.status_message, line_chats.status_message),
+                latest_reply_token = COALESCE(excluded.latest_reply_token, line_chats.latest_reply_token),
+                latest_reply_time = COALESCE(excluded.latest_reply_time, line_chats.latest_reply_time)
+        """, (source_type, source_id, display_name, picture_url, status_message, now, now, reply_token, now if reply_token else None))
         conn.commit()
 
 def update_chat_profile(source_id: str, display_name: str, picture_url: Optional[str] = None, status_message: Optional[str] = None):
@@ -243,6 +262,16 @@ def update_chat_profile(source_id: str, display_name: str, picture_url: Optional
             SET display_name = ?, picture_url = COALESCE(?, picture_url), status_message = COALESCE(?, status_message)
             WHERE source_id = ?
         """, (display_name, picture_url, status_message, source_id))
+        conn.commit()
+
+def clear_chat_reply_token(source_id: str):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE line_chats
+            SET latest_reply_token = NULL, latest_reply_time = NULL
+            WHERE source_id = ?
+        """, (source_id,))
         conn.commit()
 
 def get_line_chats() -> List[Dict[str, Any]]:
@@ -273,11 +302,18 @@ def add_line_message(chat_id: str, sender_type: str, sender_id: Optional[str],
 
         # Update last_message and last_message_at in line_chats
         snippet = content if message_type == "text" else f"[{message_type}]"
-        cursor.execute("""
-            UPDATE line_chats
-            SET last_message = ?, last_message_at = ?
-            WHERE source_id = ?
-        """, (snippet, ts, chat_id))
+        if reply_token:
+            cursor.execute("""
+                UPDATE line_chats
+                SET last_message = ?, last_message_at = ?, latest_reply_token = ?, latest_reply_time = ?
+                WHERE source_id = ?
+            """, (snippet, ts, reply_token, ts, chat_id))
+        else:
+            cursor.execute("""
+                UPDATE line_chats
+                SET last_message = ?, last_message_at = ?
+                WHERE source_id = ?
+            """, (snippet, ts, chat_id))
 
         conn.commit()
         return msg_id

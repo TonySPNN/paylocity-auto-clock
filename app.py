@@ -17,6 +17,7 @@ import scheduler
 import paylocity_bot
 import voice_caller
 import line_service
+import gemini_service
 import calendar_export
 
 logger = logging.getLogger("app")
@@ -64,6 +65,10 @@ class PunchIn(BaseModel):
 
 class SendChatMsgIn(BaseModel):
     text: str
+
+class GeminiTestIn(BaseModel):
+    api_keys: str
+    model: Optional[str] = None
 
 # Web Routes
 @app.get("/", response_class=HTMLResponse)
@@ -153,8 +158,8 @@ async def api_test_line():
     result = line_service.send_line_message("🔔 ทดสอบการแจ้งเตือนจาก Paylocity Auto Clock! ระบบเชื่อมต่อ LINE สำเร็จเรียบร้อยครับ 🎉")
     return result
 
-# Helper: Background Task to Sync LINE Chat Profile
-def sync_chat_profile(source_type: str, source_id: str):
+# Helper: Background Task to Sync LINE Chat Profile (User, Group, Room)
+def sync_chat_profile(source_type: str, source_id: str, sender_id: Optional[str] = None):
     try:
         if source_type == "user":
             res = line_service.get_user_profile(source_id)
@@ -175,10 +180,80 @@ def sync_chat_profile(source_type: str, source_id: str):
                     display_name=summ.get("groupName", f"กลุ่ม {source_id[:6]}"),
                     picture_url=summ.get("pictureUrl")
                 )
+        elif source_type == "room":
+            # สำหรับห้องแชทหลายคน (Multi-person Chat)
+            if sender_id:
+                res = line_service.get_room_member_profile(source_id, sender_id)
+                if res.get("success"):
+                    prof = res.get("profile", {})
+                    database.update_chat_profile(
+                        source_id=source_id,
+                        display_name=f"ห้องแชท ({prof.get('displayName', sender_id)})",
+                        picture_url=prof.get("pictureUrl")
+                    )
+                    return
+            database.update_chat_profile(
+                source_id=source_id,
+                display_name=f"ห้องแชทหลายคน ({source_id[-4:]})",
+                picture_url=None
+            )
     except Exception as e:
         logger.warning(f"Error sync_chat_profile: {e}")
 
-# API Routes: LINE Webhook (Auto-capture, Chat Logging, & Webhook Reports)
+# Helper: Background Task to Generate and Send AI Auto-Reply
+def handle_ai_auto_reply(source_id: str, incoming_text: str, reply_token: Optional[str] = None):
+    """
+    ประมวลผลข้อความด้วย Gemini AI และส่งคำตอบกลับผ่าน Reply API (Fallback เป็น Push)
+    """
+    try:
+        # ตรวจสอบการเปิดใช้งาน AI
+        if database.get_setting("ai_reply_enabled", "1") != "1":
+            return
+
+        api_keys = database.get_setting("gemini_api_keys", "").strip()
+        if not api_keys:
+            logger.info("Gemini API key is not configured, skipping AI auto-reply.")
+            return
+
+        # ดึงประวัติการสนทนาย้อนหลัง
+        history_records = database.get_line_messages(source_id, limit=6)
+        # เอาข้อความก่อนหน้ามาทำบริบท (ยกเว้นข้อความล่าสุดที่เพิ่งเข้ามา)
+        context_history = history_records[:-1] if len(history_records) > 1 else []
+
+        logger.info(f"Generating Gemini AI reply for {source_id}...")
+        ai_result = gemini_service.generate_ai_reply(
+            prompt=incoming_text,
+            history=context_history
+        )
+
+        if ai_result.get("success"):
+            reply_text = ai_result.get("reply_text", "").strip()
+            if reply_text:
+                # ส่งข้อความผ่าน Reply API (หรือ Fallback เป็น Push API)
+                dispatch_res = line_service.send_reply_or_push(
+                    to_id=source_id,
+                    text=reply_text,
+                    reply_token=reply_token
+                )
+
+                # บันทึกคำตอบของ AI ลงฐานข้อมูล
+                database.add_line_message(
+                    chat_id=source_id,
+                    sender_type="bot",
+                    sender_id="gemini_ai",
+                    message_type="text",
+                    content=reply_text
+                )
+
+                # เคลียร์ reply_token หลังจากใช้งานแล้ว
+                database.clear_chat_reply_token(source_id)
+                logger.info(f"AI reply dispatched to {source_id} via {dispatch_res.get('method')}")
+        else:
+            logger.warning(f"Gemini reply generation failed: {ai_result.get('message')}")
+    except Exception as e:
+        logger.error(f"Error in handle_ai_auto_reply: {e}")
+
+# API Routes: LINE Webhook (Auto-capture, Chat Logging, AI Auto-Reply & Webhook Reports)
 @app.post("/api/line/webhook")
 async def api_line_webhook(request: Request, background_tasks: BackgroundTasks):
     body_bytes = await request.body()
@@ -251,8 +326,8 @@ async def api_line_webhook(request: Request, background_tasks: BackgroundTasks):
                 content = f"[{msg_type}]"
 
             if source_id:
-                # 1. บันทึก / อัปเดตห้องแชท
-                database.upsert_line_chat(source_type=source_type, source_id=source_id)
+                # 1. บันทึก / อัปเดตห้องแชท (พร้อม reply_token ล่าสุด)
+                database.upsert_line_chat(source_type=source_type, source_id=source_id, reply_token=reply_token)
 
                 # 2. บันทึกข้อความเข้า line_messages
                 database.add_line_message(
@@ -266,42 +341,50 @@ async def api_line_webhook(request: Request, background_tasks: BackgroundTasks):
                     timestamp=timestamp_iso
                 )
 
-                # 3. ตรวจสอบว่ามีชื่อโปรไฟล์หรือยัง ถ้ายังไม่มีให้ดึงเบื้องหลัง
+                # 3. ดึงชื่อโปรไฟล์และรูปภาพหากยังไม่มี
                 chat_info = database.get_line_chat(source_id)
                 if not chat_info or not chat_info.get("display_name"):
-                    background_tasks.add_task(sync_chat_profile, source_type, source_id)
+                    background_tasks.add_task(sync_chat_profile, source_type, source_id, sender_id)
 
-                # 4. หากเป็นผู้ใช้เดี่ยวและยังไม่มี line_user_id ใน settings ให้บันทึกเป็นผู้รับแจ้งเตือนหลัก
+                # 4. บันทึกเป็นผู้รับแจ้งเตือนหลักถ้าเป็นผู้ใช้เดี่ยวและยังไม่มี
                 current_user_id = database.get_setting("line_user_id", "").strip()
                 if not current_user_id and source_type == "user":
                     database.update_settings({"line_user_id": source_id})
 
-                # 5. ทักทายอัตโนมัติเมื่อพิมพ์คำทักทายครั้งแรก
-                if reply_token and reply_token not in ("00000000000000000000000000000000", "ffffffffffffffffffffffffffffffff"):
-                    t_lower = content.strip().lower()
-                    if t_lower in ["สวัสดี", "hello", "hi", "หวัดดี", "test", "ทดสอบ"]:
-                        reply_msg = (
-                            "🎉 เชื่อมต่อระบบสำเร็จแล้วครับ!\n"
-                            "ระบบบันทึกข้อความของคุณเรียบร้อยแล้ว\n"
-                            "แอดมินสามารถดูประวัติและตอบแชทกลับผ่านหน้าเว็บได้แบบเรียลไทม์ครับ 😊"
-                        )
-                        line_service.reply_line_message(reply_token, reply_msg)
-                        database.add_line_message(
-                            chat_id=source_id,
-                            sender_type="bot",
-                            sender_id="bot",
-                            message_type="text",
-                            content=reply_msg
-                        )
+                # 5. ประมวลผลการตอบกลับอัตโนมัติด้วย AI หรือ Greeting
+                if msg_type == "text" and content.strip():
+                    ai_enabled = database.get_setting("ai_reply_enabled", "1") == "1"
+                    gemini_keys = database.get_setting("gemini_api_keys", "").strip()
+
+                    if ai_enabled and gemini_keys:
+                        # สั่งรัน AI Auto-reply เบื้องหลัง
+                        background_tasks.add_task(handle_ai_auto_reply, source_id, content, reply_token)
+                    elif reply_token and reply_token not in ("00000000000000000000000000000000", "ffffffffffffffffffffffffffffffff"):
+                        t_lower = content.strip().lower()
+                        if t_lower in ["สวัสดี", "hello", "hi", "หวัดดี", "test", "ทดสอบ"]:
+                            reply_msg = (
+                                "🎉 เชื่อมต่อระบบสำเร็จแล้วครับ!\n"
+                                "ระบบบันทึกข้อความของคุณเรียบร้อยแล้ว\n"
+                                "แอดมินสามารถดูประวัติและตอบแชทกลับผ่านหน้าเว็บได้แบบเรียลไทม์ครับ 😊"
+                            )
+                            line_service.send_reply_or_push(source_id, reply_msg, reply_token)
+                            database.add_line_message(
+                                chat_id=source_id,
+                                sender_type="bot",
+                                sender_id="bot",
+                                message_type="text",
+                                content=reply_msg
+                            )
+                            database.clear_chat_reply_token(source_id)
 
         elif ev_type in ["follow", "join"]:
             event_types_list.append(ev_type)
             if source_id:
-                database.upsert_line_chat(source_type=source_type, source_id=source_id)
-                background_tasks.add_task(sync_chat_profile, source_type, source_id)
+                database.upsert_line_chat(source_type=source_type, source_id=source_id, reply_token=reply_token)
+                background_tasks.add_task(sync_chat_profile, source_type, source_id, sender_id)
                 if reply_token and reply_token not in ("00000000000000000000000000000000", "ffffffffffffffffffffffffffffffff"):
                     welcome_msg = "ยินดีต้อนรับครับ! ขอบคุณที่เพิ่มเพื่อนกับเรา 😊"
-                    line_service.reply_line_message(reply_token, welcome_msg)
+                    line_service.send_reply_or_push(source_id, welcome_msg, reply_token)
                     database.add_line_message(
                         chat_id=source_id,
                         sender_type="bot",
@@ -309,6 +392,7 @@ async def api_line_webhook(request: Request, background_tasks: BackgroundTasks):
                         message_type="text",
                         content=welcome_msg
                     )
+                    database.clear_chat_reply_token(source_id)
         else:
             event_types_list.append(ev_type)
 
@@ -328,6 +412,15 @@ async def api_line_webhook(request: Request, background_tasks: BackgroundTasks):
 async def api_line_test_connection():
     return line_service.get_bot_info()
 
+# API Routes: Gemini AI Models & Connection Test
+@app.post("/api/gemini/test")
+async def api_test_gemini(body: GeminiTestIn):
+    return gemini_service.test_gemini_connection(api_keys=body.api_keys, model=body.model)
+
+@app.get("/api/gemini/models")
+async def api_get_gemini_models():
+    return gemini_service.list_available_models()
+
 # API Routes: LINE Chats & Messages
 @app.get("/api/line/chats")
 async def api_get_line_chats():
@@ -345,8 +438,12 @@ async def api_send_line_chat_message(source_id: str, body: SendChatMsgIn):
     if not text:
         raise HTTPException(status_code=400, detail="ข้อความต้องไม่ว่างเปล่า")
 
-    # ส่งข้อความผ่าน LINE Push API
-    res = line_service.send_line_push_to(to_id=source_id, text=text)
+    # ตรวจสอบว่าห้องแชทมี replyToken ที่ยังใช้งานได้อยู่หรือไม่
+    chat = database.get_line_chat(source_id)
+    reply_token = chat.get("latest_reply_token") if chat else None
+
+    # ส่งข้อความผ่าน Reply API ก่อน ถ้าไม่สำเร็จให้ Fallback เป็น Push API ทันที
+    res = line_service.send_reply_or_push(to_id=source_id, text=text, reply_token=reply_token)
     if res.get("success"):
         # บันทึกลง database
         msg_id = database.add_line_message(
@@ -356,7 +453,14 @@ async def api_send_line_chat_message(source_id: str, body: SendChatMsgIn):
             message_type="text",
             content=text
         )
-        return {"success": True, "message_id": msg_id, "message": "ส่งข้อความสำเร็จ"}
+        # เคลียร์ reply_token หลังจากใช้งานแล้ว
+        database.clear_chat_reply_token(source_id)
+        return {
+            "success": True,
+            "message_id": msg_id,
+            "method": res.get("method"),
+            "message": f"ส่งข้อความสำเร็จ ({res.get('method').upper()})"
+        }
     else:
         return {"success": False, "message": res.get("message", "ส่งข้อความไม่สำเร็จ")}
 
