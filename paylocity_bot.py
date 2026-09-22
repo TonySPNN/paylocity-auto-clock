@@ -19,74 +19,119 @@ os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 def get_browser_context_config(profile: str = "macos_sequoia") -> Dict[str, Any]:
     """
-    สร้าง User-Agent และ Client Hints ให้สอดคล้องกับ Duo Security OS Compliance Policy
-    ป้องกันการแจ้งเตือน 'macOS update required' หรือบล็อกเพราะ OS ตกรุ่น
+    สร้าง User-Agent และ Client Hints ให้สอดคล้องกับ Duo Security OS & Browser Compliance Policy
+    ป้องกันการแจ้งเตือน 'macOS update required' หรือ 'Chrome update required'
     """
     profile = (profile or "macos_sequoia").lower()
+    chrome_major = "146"
+    chrome_full = "146.0.7680.179"
     
     if "windows" in profile:
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+        user_agent = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_major}.0.0.0 Safari/537.36"
         sec_platform = '"Windows"'
         platform_ver = '"15.0.0"'
         client_platform = 'Windows'
         client_arch = 'x86'
     else:  # macos_sequoia (macOS 15.7.9 Sequoia)
-        user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+        user_agent = f"Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_major}.0.0.0 Safari/537.36"
         sec_platform = '"macOS"'
         platform_ver = '"15.7.9"'
         client_platform = 'macOS'
         client_arch = 'arm'
 
     extra_headers = {
-        "Sec-CH-UA": '"Chromium";v="127", "Google Chrome";v="127", "Not-A.Brand";v="99"',
+        "Sec-CH-UA": f'"Google Chrome";v="{chrome_major}", "Chromium";v="{chrome_major}", "Not(A:Brand";v="24"',
         "Sec-CH-UA-Mobile": "?0",
         "Sec-CH-UA-Platform": sec_platform,
         "Sec-CH-UA-Platform-Version": platform_ver,
+        "Sec-CH-UA-Full-Version-List": f'"Google Chrome";v="{chrome_full}", "Chromium";v="{chrome_full}", "Not(A:Brand";v="24.0.0.0"',
+        "Sec-CH-UA-Arch": f'"{client_arch}"',
+        "Sec-CH-UA-Bitness": '"64"',
+        "Sec-CH-UA-Model": '""',
     }
 
     js_override = f"""
-        // 1. Mask navigator.webdriver
+        // 1. ซ่อน navigator.webdriver เพื่อไม่ให้ตรวจจับว่าเป็นบอท
         Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
 
-        // 2. Client Hints / UserAgentData Override
-        const brands = [
-            {{ brand: 'Not-A.Brand', version: '99' }},
-            {{ brand: 'Chromium', version: '127' }},
-            {{ brand: 'Google Chrome', version: '127' }}
+        // 2. กำหนดชุดข้อมูล Brand & Version ของ Chrome ล่าสุด
+        const modernBrands = [
+            {{ brand: 'Google Chrome', version: '{chrome_major}' }},
+            {{ brand: 'Chromium', version: '{chrome_major}' }},
+            {{ brand: 'Not(A:Brand', version: '24' }}
+        ];
+        const modernFullVersions = [
+            {{ brand: 'Google Chrome', version: '{chrome_full}' }},
+            {{ brand: 'Chromium', version: '{chrome_full}' }},
+            {{ brand: 'Not(A:Brand', version: '24.0.0.0' }}
         ];
 
-        if (!navigator.userAgentData) {{
-            navigator.userAgentData = {{
-                brands: brands,
-                mobile: false,
-                platform: '{client_platform}',
-                getHighEntropyValues: async function(hints) {{
-                    return {{
-                        brands: brands,
-                        mobile: false,
-                        platform: '{client_platform}',
-                        platformVersion: {platform_ver},
-                        architecture: '{client_arch}',
-                        bitness: '64',
-                        model: '',
-                        uaFullVersion: '127.0.6533.17',
-                        fullVersionList: brands
-                    }};
-                }}
-            }};
-        }} else {{
-            const originalGet = navigator.userAgentData.getHighEntropyValues ? navigator.userAgentData.getHighEntropyValues.bind(navigator.userAgentData) : null;
-            navigator.userAgentData.getHighEntropyValues = async function(hints) {{
-                let base = originalGet ? await originalGet(hints) : {{}};
-                return Object.assign(base, {{
-                    platform: '{client_platform}',
-                    platformVersion: {platform_ver},
+        const mockUserAgentData = {{
+            brands: modernBrands,
+            mobile: false,
+            platform: '{client_platform}',
+            getHighEntropyValues: async function(hints) {{
+                return {{
                     architecture: '{client_arch}',
                     bitness: '64',
-                    model: ''
-                }});
+                    brands: modernBrands,
+                    fullVersionList: modernFullVersions,
+                    mobile: false,
+                    model: '',
+                    platform: '{client_platform}',
+                    platformVersion: {platform_ver},
+                    uaFullVersion: '{chrome_full}'
+                }};
+            }},
+            toJSON: function() {{
+                return {{
+                    brands: modernBrands,
+                    mobile: false,
+                    platform: '{client_platform}'
+                }};
+            }}
+        }};
+
+        // Override navigator.userAgentData อย่างสมบูรณ์ เพื่อกำจัด HeadlessChrome และเวอร์ชันเก่าทิ้งทั้งหมด
+        Object.defineProperty(navigator, 'userAgentData', {{
+            get: () => mockUserAgentData,
+            configurable: true,
+            enumerable: true
+        }});
+
+        // 3. จำลอง plugins ให้เหมือน Desktop Chrome ปกติ
+        if (!navigator.plugins || navigator.plugins.length === 0) {{
+            const mockPlugins = [
+                {{ name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }},
+                {{ name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }},
+                {{ name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }}
+            ];
+            Object.defineProperty(navigator, 'plugins', {{
+                get: () => mockPlugins,
+                configurable: true,
+                enumerable: true
+            }});
+        }}
+
+        // 4. จำลอง window.chrome ให้สมบูรณ์
+        if (!window.chrome) {{
+            window.chrome = {{}};
+        }}
+        if (!window.chrome.runtime) {{
+            window.chrome.runtime = {{}};
+        }}
+        if (!window.chrome.loadTimes) {{
+            window.chrome.loadTimes = function() {{}};
+        }}
+        if (!window.chrome.csi) {{
+            window.chrome.csi = function() {{}};
+        }}
+        if (!window.chrome.app) {{
+            window.chrome.app = {{
+                isInstalled: false,
+                InstallState: {{ DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }},
+                RunningState: {{ CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' }}
             }};
-            Object.defineProperty(navigator.userAgentData, 'platform', {{ get: () => '{client_platform}' }});
         }}
     """
 
@@ -233,7 +278,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
         context = await browser.new_context(
             viewport={"width": 1280, "height": 800},
             user_agent=browser_config["user_agent"],
-            extra_http_headers=browser_config["extra_http_headers"]
+            extra_http_headers=browser_config["extra_http_headers"],
+            locale="en-US",
+            timezone_id="Asia/Bangkok"
         )
         await context.add_init_script(browser_config["js_override"])
         page = await context.new_page()
