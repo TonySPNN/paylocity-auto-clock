@@ -220,6 +220,26 @@ async def handle_duo_prompts(page) -> bool:
     return False
 
 
+async def record_step(history_id: Optional[int], page, message: str, take_screenshot: bool = True):
+    """
+    บันทึกความคืบหน้าระหว่างทำงานลง Database เพื่อให้หน้าบ้านและผู้ใช้ติดตามสถานะได้ Realtime
+    พร้อมบันทึกภาพถ่ายหน้าจอสด (live_{history_id}.png) เพื่อให้เห็นหน้าจอเบราว์เซอร์จริง
+    """
+    if not history_id:
+        return
+    logger.info(f"Progress [{history_id}]: {message}")
+    live_shot_path = None
+    if take_screenshot and page:
+        try:
+            live_filename = f"live_{history_id}.png"
+            live_full = os.path.join(SCREENSHOT_DIR, live_filename)
+            await page.screenshot(path=live_full)
+            live_shot_path = f"/screenshots/{live_filename}"
+        except Exception as e:
+            logger.debug(f"Live screenshot note: {e}")
+    update_history(history_id, "running", message, screenshot_path=live_shot_path)
+
+
 async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) -> Dict[str, Any]:
     """
     รันบอท Playwright เพื่อทำการ Clock In หรือ Clock Out
@@ -231,9 +251,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
     screenshot_path = os.path.join(SCREENSHOT_DIR, screenshot_filename)
 
     if not history_id:
-        history_id = add_history(action, "running", f"กำลังเริ่มต้นกระบวนการลงเวลา {action_th}...")
+        history_id = add_history(action, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นกระบวนการลงเวลา {action_th}...")
     else:
-        update_history(history_id, "running", f"กำลังเริ่มต้นกระบวนการลงเวลา {action_th}...")
+        update_history(history_id, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นกระบวนการลงเวลา {action_th}...")
 
     logger.info(f"Starting punch workflow for {action} (History ID: {history_id})")
 
@@ -287,8 +307,10 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
         try:
             logger.info("Step 1: Navigating to Paylocity login URL...")
+            await record_step(history_id, page, f"[สเต็ป 1/7] กำลังเปิดหน้าเว็บเข้าสู่ระบบ Paylocity SSO...", take_screenshot=True)
             await page.goto(paylocity_url, wait_until="networkidle", timeout=60000)
             await asyncio.sleep(2)
+            await record_step(history_id, page, f"[สเต็ป 1/7] หน้าเว็บ Paylocity โหลดเสร็จแล้ว กำลังค้นหาปุ่ม SSO...", take_screenshot=True)
 
             # Step 2: กดปุ่ม Single Sign-On (SSO)
             logger.info("Step 2: Looking for Single Sign-On (SSO) button...")
@@ -300,6 +322,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             )
             if await sso_btn.count() > 0 and await sso_btn.first.is_visible():
                 logger.info("Found SSO button, clicking...")
+                await record_step(history_id, page, "[สเต็ป 2/7] พบบริการ Single Sign-On (SSO) กำลังคลิก...", take_screenshot=True)
                 await sso_btn.first.click()
                 await asyncio.sleep(2)
 
@@ -313,6 +336,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 await company_input.first.wait_for(state="visible", timeout=10000)
                 if company_id:
                     logger.info(f"Filling Company ID: {company_id}")
+                    await record_step(history_id, page, f"[สเต็ป 3/7] กำลังกรอก Company ID ({company_id})...", take_screenshot=True)
                     await company_input.first.fill(company_id)
                 
                 # กดปุ่ม Continue / Next / Submit ของหน้า Company ID
@@ -337,6 +361,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             try:
                 await user_input.first.wait_for(state="visible", timeout=15000)
                 logger.info(f"Filling Email: {username}")
+                await record_step(history_id, page, f"[สเต็ป 4/7] กำลังกรอก Email บริษัท ({username})...", take_screenshot=True)
                 await user_input.first.fill(username)
             except Exception:
                 logger.warning("Could not locate email input directly, searching again...")
@@ -371,6 +396,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             # พิมพ์รหัสผ่านจริงทีละตัวอักษร (delay 40ms) เพื่อให้ event ของเบราว์เซอร์รับค่าจริงแน่นอน 100%
             real_pass = str(password).strip()
             logger.info(f"Typing user real password (length: {len(real_pass)} chars)...")
+            await record_step(history_id, page, f"[สเต็ป 5/7] กำลังป้อนรหัสผ่านจริงทีละตัวอักษร...", take_screenshot=False)
             await pass_input.first.press_sequentially(real_pass, delay=40)
             await asyncio.sleep(0.5)
 
@@ -378,6 +404,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             login_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Sign In'), input[value='Login'], input[value='Sign in'], input#idSIButton9")
             if await login_btn.count() > 0 and await login_btn.first.is_visible():
                 logger.info("Clicking Sign In button...")
+                await record_step(history_id, page, "[สเต็ป 5/7] กำลังกด Sign In เข้าสู่ระบบ...", take_screenshot=True)
                 await login_btn.first.click()
             else:
                 await page.keyboard.press("Enter")
@@ -388,11 +415,14 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             stay_signed_in = page.locator("input#idSIButton9[value='Yes'], button:has-text('Yes'), button:has-text('Stay signed in')")
             if await stay_signed_in.count() > 0 and await stay_signed_in.first.is_visible():
                 logger.info("Clicking 'Yes' on Stay signed in prompt...")
+                await record_step(history_id, page, "[สเต็ป 5/7] ตอบรับหน้าต่าง Stay signed in...", take_screenshot=True)
                 await stay_signed_in.first.click()
                 await asyncio.sleep(2)
 
             # Step 6: เข้าสู่หน้า Duo Security 2FA
             logger.info("Step 6: Duo 2FA stage reached - sending LINE alert...")
+            await record_step(history_id, page, "[สเต็ป 6/7] 📱 ถึงหน้า Duo 2FA แล้ว! กำลังส่ง Duo Push ไปยังโทรศัพท์ของคุณ...", take_screenshot=True)
+            
             # ส่งสายโทรเฉพาะเมื่อเปิดใช้งานใน Settings
             if get_setting("voice_call_enabled", "0") == "1":
                 make_voice_call(action_text="เข้างาน" if action == "clock_in" else "ออกงาน")
@@ -405,7 +435,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
             # ตรวจสอบหาปุ่ม Send Push หรือจัดการ prompt ในเบื้องต้น (ทั้งหน้าหลักและทุก iframe)
             try:
-                await handle_duo_prompts(page)
+                clicked_init = await handle_duo_prompts(page)
+                if clicked_init:
+                    await record_step(history_id, page, "[สเต็ป 6/7] คลิกปุ่ม Duo Push / Prompt สำเร็จ...", take_screenshot=True)
             except Exception as e:
                 logger.debug(f"Duo initial prompt handler note: {e}")
 
@@ -413,13 +445,28 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             logger.info("Step 7: Waiting for Duo approval on user's phone (up to 120s)...")
             start_wait = time.time()
             approved = False
+            last_record_time = 0
 
             while time.time() - start_wait < 120:
+                elapsed = int(time.time() - start_wait)
+                remain = max(0, 120 - elapsed)
                 current_url = page.url
+
+                # บันทึกความคืบหน้ารวมถึงนับเวลาถอยหลังและแคปเจอร์จอสดทุก 3 วินาที
+                if time.time() - last_record_time >= 3:
+                    await record_step(
+                        history_id,
+                        page,
+                        f"[สเต็ป 6/7] ⏳ กำลังรอคุณกด Approve บนมือถือในแอป Duo (เหลือเวลาอีก {remain} วินาที)...",
+                        take_screenshot=True
+                    )
+                    last_record_time = time.time()
 
                 # ตรวจจับและคลิกปุ่มอัตโนมัติ (Trust this browser, Skip/Dismiss notices, Duo Push)
                 try:
-                    await handle_duo_prompts(page)
+                    clicked_duo = await handle_duo_prompts(page)
+                    if clicked_duo:
+                        await record_step(history_id, page, "[สเต็ป 6/7] ตรวจพบและคลิกปุ่มของ Duo (Trust/Skip/Push) เรียบร้อยแล้ว...", take_screenshot=True)
                 except Exception as e:
                     logger.debug(f"Duo loop prompt error: {e}")
 
@@ -437,6 +484,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 if "escher" in current_url.lower() or "login.paylocity.com" in current_url.lower() or "punch" in current_url.lower() or "portal" in current_url.lower() or "workforce" in current_url.lower():
                     approved = True
                     logger.info("Duo approval detected! Redirecting to Paylocity portal.")
+                    await record_step(history_id, page, f"[สเต็ป 7/7] 👍 ตรวจพบการ Approve จาก Duo แล้ว! กำลังเข้าสู่หน้าหลักเพื่อลงเวลา {action_th}...", take_screenshot=True)
                     # แจ้งเตือนใน LINE ว่าได้รับ Approve แล้ว
                     send_line_message(f"👍 [Paylocity] ตรวจพบการ Approve จาก Duo แล้ว!\nกำลังเข้าสู่หน้าหลักเพื่อกดลงเวลา {action_th}...")
                     break
@@ -447,13 +495,14 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 await page.screenshot(path=screenshot_path)
                 err_msg = "หมดเวลาการรออนุมัติ Duo (ไม่ได้กด Approve บนมือถือภายใน 120 วินาที)"
                 logger.error(err_msg)
-                update_history(history_id, "failed", err_msg, f"/screenshots/{screenshot_filename}")
+                update_history(history_id, "failed", f"[ล้มเหลว] ❌ {err_msg}", f"/screenshots/{screenshot_filename}")
                 send_line_message(f"❌ ลงเวลา {action_th} ล้มเหลว:\n{err_msg}")
                 await browser.close()
                 return {"success": False, "message": err_msg}
 
             # Step 8: รอให้หน้าหลัก Paylocity โหลดเสร็จสมบูรณ์
             logger.info("Step 8: Waiting for Paylocity main dashboard to load...")
+            await record_step(history_id, page, "[สเต็ป 7/7] กำลังโหลดหน้าหลัก Paylocity Dashboard...", take_screenshot=True)
             await asyncio.sleep(5)
 
             # ตรวจสอบเผื่อมี prompt ตกค้างหรือ popup ข้ามในหน้าหลัก
@@ -469,6 +518,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
             # Step 9: เลื่อนหน้าจอหาปุ่ม Clock In หรือ Clock Out
             logger.info(f"Step 9: Scrolling and looking for {action} button...")
+            await record_step(history_id, page, f"[สเต็ป 7/7] กำลังเลื่อนหน้าจอค้นหาปุ่มลงเวลา {action_th}...", take_screenshot=True)
             # เลื่อนหน้าจอลงเล็กน้อยเพื่อให้เห็นวิดเจ็ตลงเวลา
             await page.evaluate("window.scrollTo(0, 300)")
             await asyncio.sleep(1)
@@ -507,6 +557,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 loc = page.locator(sel)
                 if await loc.count() > 0 and await loc.first.is_visible():
                     logger.info(f"Found {action} button with selector '{sel}', clicking...")
+                    await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {action_th} แล้ว กำลังคลิกลงเวลา...", take_screenshot=True)
                     await loc.first.scroll_into_view_if_needed()
                     await loc.first.click()
                     button_found = True
@@ -520,6 +571,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                     loc = page.locator(sel)
                     if await loc.count() > 0 and await loc.first.is_visible():
                         logger.info(f"Found {action} button after scroll with selector '{sel}', clicking...")
+                        await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {action_th} แล้ว กำลังคลิกลงเวลา...", take_screenshot=True)
                         await loc.first.scroll_into_view_if_needed()
                         await loc.first.click()
                         button_found = True
@@ -530,6 +582,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 generic_punch = page.locator("button:has-text('Punch'), [aria-label*='Punch' i], [data-testid*='punch' i]")
                 if await generic_punch.count() > 0 and await generic_punch.first.is_visible():
                     logger.info("Found generic Punch button, clicking...")
+                    await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม Punch กำลังคลิกลงเวลา...", take_screenshot=True)
                     await generic_punch.first.click()
                     button_found = True
 
@@ -541,10 +594,10 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
             now_str = datetime.now().strftime("%H:%M:%S (%d/%m/%Y)")
             if button_found:
-                success_msg = f"กดปุ่ม {action_th} สำเร็จเรียบร้อยเมื่อ {now_str}"
+                success_msg = f"🎉 ลงเวลา {action_th} สำเร็จเรียบร้อยเมื่อ {now_str}"
                 status = "success"
             else:
-                success_msg = f"เข้าสู่ระบบได้สำเร็จ แต่ไม่พบปุ่ม {action_th} อัตโนมัติ (บันทึกภาพหน้าจอไว้ให้ตรวจสอบ)"
+                success_msg = f"⚠️ เข้าสู่ระบบได้สำเร็จ แต่ไม่พบปุ่ม {action_th} อัตโนมัติ (บันทึกภาพหน้าจอไว้ให้ตรวจสอบ)"
                 status = "warning"
 
             update_history(history_id, status, success_msg, f"/screenshots/{screenshot_filename}")
@@ -555,6 +608,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 f"⏰ เวลา: {now_str}\n"
                 f"📌 สถานะ: {success_msg}"
             )
+            send_line_image(screenshot_path)
 
             await browser.close()
             return {"success": True, "message": success_msg, "screenshot": f"/screenshots/{screenshot_filename}"}
@@ -566,9 +620,10 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             except Exception:
                 pass
             
-            err_msg = f"เกิดข้อผิดพลาดระหว่างรันบอท: {str(e)}"
+            err_msg = f"[ล้มเหลว] ❌ เกิดข้อผิดพลาดระหว่างรันบอท: {str(e)}"
             update_history(history_id, "failed", err_msg, f"/screenshots/{screenshot_filename}")
             send_line_message(f"❌ ลงเวลา {action_th} ล้มเหลว:\n{err_msg}")
+            send_line_image(screenshot_path)
             await browser.close()
             return {"success": False, "message": err_msg}
 

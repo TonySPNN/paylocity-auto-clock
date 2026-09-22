@@ -135,16 +135,34 @@ async def api_save_settings(settings: Dict[str, str]):
     scheduler.reload_schedules()
     return {"message": "บันทึกการตั้งค่าสำเร็จ"}
 
-# API Routes: Punch Trigger
+# API Routes: Punch Trigger & Status Monitoring
 @app.post("/api/punch")
 async def api_trigger_punch(punch: PunchIn, background_tasks: BackgroundTasks):
     action = punch.action
     action_th = "เข้างาน (Clock In)" if action == "clock_in" else "ออกงาน (Clock Out)"
-    history_id = database.add_history(action, "running", f"เริ่มกระบวนการลงเวลา {action_th}...")
+    history_id = database.add_history(action, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นระบบลงเวลา {action_th}...")
     
     # Run in background so HTTP response returns immediately
     background_tasks.add_task(paylocity_bot.run_punch, action, history_id)
-    return {"message": f"เริ่มกระบวนการลงเวลา {action_th} แล้ว ระบบจะโทรเข้ามือถือและส่งผลเข้า LINE"}
+    return {
+        "success": True,
+        "history_id": history_id,
+        "action": action,
+        "action_th": action_th,
+        "message": f"เริ่มกระบวนการลงเวลา {action_th} แล้ว"
+    }
+
+@app.get("/api/punch/status/{history_id}")
+async def api_get_punch_status_by_id(history_id: int):
+    h = database.get_history_by_id(history_id)
+    if not h:
+        raise HTTPException(status_code=404, detail="History not found")
+    return {"found": True, "history": h}
+
+@app.get("/api/punch/status")
+async def api_get_latest_punch_status():
+    h = database.get_running_history()
+    return {"running": (h["status"] == "running") if h else False, "history": h}
 
 # API Routes: Test Voice Call
 @app.post("/api/test-call")

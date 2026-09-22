@@ -236,6 +236,16 @@ def get_histories(limit: int = 50) -> List[Dict[str, Any]]:
         rows = conn.cursor().execute("SELECT * FROM history ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+def get_history_by_id(history_id: int) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.cursor().execute("SELECT * FROM history WHERE id = ?", (history_id,)).fetchone()
+        return dict(row) if row else None
+
+def get_running_history() -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.cursor().execute("SELECT * FROM history WHERE status = 'running' ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
 # LINE Chat & Message Helpers
 def upsert_line_chat(source_type: str, source_id: str, display_name: Optional[str] = None,
                      picture_url: Optional[str] = None, status_message: Optional[str] = None,
