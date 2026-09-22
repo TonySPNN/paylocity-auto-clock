@@ -73,81 +73,108 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
         page = await context.new_page()
 
         try:
-            logger.info(f"Navigating to Paylocity login URL...")
+            logger.info("Step 1: Navigating to Paylocity login URL...")
             await page.goto(paylocity_url, wait_until="networkidle", timeout=60000)
             await asyncio.sleep(2)
 
-            # 1. กรอกข้อมูลล็อกอิน & ตรวจสอบปุ่ม Single Sign-On (SSO)
-            logger.info("Checking for SSO or Login form...")
-
-            # หากมีปุ่ม SSO ให้กดเข้าสู่ระบบผ่าน SSO ทันที
-            sso_btn = page.locator("button:has-text('Single Sign-On'), a:has-text('Single Sign-On'), button:has-text('SSO'), a:has-text('SSO'), [aria-label*='SSO' i], [data-testid*='sso' i]")
+            # Step 2: กดปุ่ม Single Sign-On (SSO)
+            logger.info("Step 2: Looking for Single Sign-On (SSO) button...")
+            sso_btn = page.locator(
+                "button:has-text('Single Sign-On'), a:has-text('Single Sign-On'), "
+                "button:has-text('SSO'), a:has-text('SSO'), "
+                "button:has-text('Log in with SSO'), a:has-text('Log in with SSO'), "
+                "[aria-label*='Single Sign-On' i], [aria-label*='SSO' i], [data-testid*='sso' i]"
+            )
             if await sso_btn.count() > 0 and await sso_btn.first.is_visible():
-                logger.info("Found Single Sign-On (SSO) button, clicking...")
+                logger.info("Found SSO button, clicking...")
                 await sso_btn.first.click()
                 await asyncio.sleep(2)
 
-            # ตรวจสอบว่ามีช่อง Company ID หรือไม่ (ถ้ามีค่าค่อยกรอก)
-            if company_id:
-                company_input = page.locator("input#CompanyId, input[name='CompanyId'], input[placeholder*='Company' i]")
-                if await company_input.count() > 0 and await company_input.first.is_visible():
-                    logger.info("Filling Company ID...")
+            # Step 3: กรอก Company ID
+            logger.info("Step 3: Looking for Company ID input...")
+            company_input = page.locator(
+                "input#CompanyId, input[name='CompanyId'], input#companyId, input[name='companyId'], "
+                "input[placeholder*='Company' i], input[aria-label*='Company' i], input[id*='Company' i]"
+            )
+            if await company_input.count() > 0:
+                await company_input.first.wait_for(state="visible", timeout=10000)
+                if company_id:
+                    logger.info(f"Filling Company ID: {company_id}")
                     await company_input.first.fill(company_id)
+                
+                # กดปุ่ม Continue / Next / Submit ของหน้า Company ID
+                comp_submit = page.locator(
+                    "button:has-text('Continue'), button:has-text('Next'), button:has-text('Submit'), "
+                    "input[value='Continue'], input[value='Next'], button[type='submit']"
+                )
+                if await comp_submit.count() > 0 and await comp_submit.first.is_visible():
+                    logger.info("Submitting Company ID...")
+                    await comp_submit.first.click()
+                else:
+                    await page.keyboard.press("Enter")
+                await asyncio.sleep(3)
 
-            # กรอก Email / Username
-            user_input = page.locator("input[type='email'], input#Username, input[name='Username'], input[name='loginfmt'], input#identification, input[name='identifier'], input[placeholder*='Email' i], input[placeholder*='User' i]")
-            if await user_input.count() > 0 and await user_input.first.is_visible():
-                logger.info("Filling Email/Username...")
+            # Step 4: กรอก Email
+            logger.info("Step 4: Looking for Email / Username input...")
+            user_input = page.locator(
+                "input[type='email'], input#Username, input[name='Username'], input[name='loginfmt'], "
+                "input#identification, input[name='identifier'], input#i0116, "
+                "input[placeholder*='Email' i], input[placeholder*='Username' i], input[placeholder*='User' i]"
+            )
+            try:
+                await user_input.first.wait_for(state="visible", timeout=15000)
+                logger.info(f"Filling Email: {username}")
                 await user_input.first.fill(username)
+            except Exception:
+                logger.warning("Could not locate email input directly, searching again...")
 
-            # ตรวจสอบว่าช่อง Password ปรากฏอยู่บนหน้าจอแล้วหรือไม่
-            pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd']")
+            # ตรวจสอบว่าช่อง Password แสดงอยู่แล้วหรือไม่
+            pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd'], input#i0118")
             pass_visible = await pass_input.count() > 0 and await pass_input.first.is_visible()
 
-            # หากเป็นระบบล็อกอินแบบ 2 สเต็ป (เช่น Microsoft / Okta ที่ต้องกด Next ก่อนกรอกรหัส)
+            # หากเป็นระบบ Next ก่อนรหัสผ่าน (เช่น Microsoft / Okta)
             if not pass_visible:
                 next_btn = page.locator("button:has-text('Next'), input[value='Next'], button:has-text('Continue'), input#idSIButton9, button[type='submit']")
                 if await next_btn.count() > 0 and await next_btn.first.is_visible():
-                    logger.info("Clicking Next to proceed to password...")
+                    logger.info("Clicking Next to reveal password field...")
                     await next_btn.first.click()
                     await asyncio.sleep(2)
 
-            # กรอก Password
-            pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd']")
-            if await pass_input.count() > 0 and await pass_input.first.is_visible():
-                logger.info("Filling Password...")
-                await pass_input.first.fill(password)
+            # Step 5: กรอก Password
+            logger.info("Step 5: Looking for Password input...")
+            pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd'], input#i0118")
+            await pass_input.first.wait_for(state="visible", timeout=15000)
+            logger.info("Filling Password...")
+            await pass_input.first.fill(password)
 
-            # กดปุ่ม Login / Sign In / Submit
+            # กดปุ่ม Login / Sign In
             login_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Sign In'), input[value='Login'], input[value='Sign in'], input#idSIButton9")
             if await login_btn.count() > 0 and await login_btn.first.is_visible():
-                logger.info("Clicking Login button...")
+                logger.info("Clicking Sign In button...")
                 await login_btn.first.click()
             else:
                 await page.keyboard.press("Enter")
 
             await asyncio.sleep(3)
 
-            # จัดการหน้าต่าง 'Stay signed in?' (ถ้ามี เช่น Microsoft SSO)
+            # ตรวจสอบปุ่ม 'Stay signed in?' (ถ้ามี เช่น Microsoft SSO)
             stay_signed_in = page.locator("input#idSIButton9[value='Yes'], button:has-text('Yes'), button:has-text('Stay signed in')")
             if await stay_signed_in.count() > 0 and await stay_signed_in.first.is_visible():
                 logger.info("Clicking 'Yes' on Stay signed in prompt...")
                 await stay_signed_in.first.click()
                 await asyncio.sleep(2)
 
-            # 2. ตรวจจับหน้า Duo Security 2FA
-            logger.info("Checking for Duo 2FA prompt...")
-            # ส่งสายโทรเข้ามือถือ และส่งข้อความเตือน LINE ทันที
+            # Step 6: เข้าสู่หน้า Duo Security 2FA
+            logger.info("Step 6: Duo 2FA stage reached - triggering phone call and LINE alert...")
             make_voice_call(action_text="เข้างาน" if action == "clock_in" else "ออกงาน")
             send_line_message(
                 f"⏰ ถึงเวลาลงเวลา {action_th} แล้ว!\n"
                 "ระบบกำลังเชื่อมต่อ Paylocity...\n"
-                "👉 กรุณาเปิดแอปพลิเคชัน Duo บนมือถือของคุณ แล้วแตะ 'Approve / ติ๊กถูก' ได้เลยครับ"
+                "👉 กรุณาเปิดแอป Duo บนมือถือ แล้วแตะ 'Approve / ติ๊กถูก' ได้เลยครับ"
             )
 
             # ตรวจสอบหาปุ่ม Send Push ของ Duo เผื่อระบบไม่ได้ส่งอัตโนมัติ
             try:
-                # ตรวจสอบทั้งในหน้าเว็บหลักและใน iframe
                 duo_push_btn = page.locator("button:has-text('Send Me a Push'), button:has-text('Duo Push'), button:has-text('Push')")
                 if await duo_push_btn.count() > 0 and await duo_push_btn.first.is_visible():
                     logger.info("Clicking Duo Send Push button...")
@@ -155,21 +182,32 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             except Exception as e:
                 logger.debug(f"Duo push button search note: {e}")
 
-            # 3. รอผู้ใช้กดยืนยันตัวตนในแอป Duo (สูงสุด 120 วินาที)
-            logger.info("Waiting for Duo approval on user's phone (up to 120s)...")
+            # Step 7: รอผู้ใช้กดยืนยันตัวตนในแอป Duo (สูงสุด 120 วินาที)
+            logger.info("Step 7: Waiting for Duo approval on user's phone (up to 120s)...")
             start_wait = time.time()
             approved = False
 
             while time.time() - start_wait < 120:
                 current_url = page.url
+                # ตรวจสอบการกดข้ามหน้าต่างแจ้งเตือน (เช่น ให้อัปเกรด iOS / OS / แจ้งเตือนความปลอดภัย)
+                skip_popups = page.locator(
+                    "button:has-text('Skip for now'), a:has-text('Skip for now'), "
+                    "button:has-text('Skip'), a:has-text('Skip'), "
+                    "button:has-text('Remind me later'), button:has-text('Dismiss'), "
+                    "button:has-text('Not now'), button:has-text('Continue'), "
+                    "button:has-text('Close'), button:has-text('Update later'), "
+                    "button:has-text('ข้าม'), button:has-text('ภายหลัง')"
+                )
+                if await skip_popups.count() > 0 and await skip_popups.first.is_visible():
+                    logger.info("Found upgrade/notice prompt, clicking skip/dismiss...")
+                    await skip_popups.first.click()
+                    await asyncio.sleep(2)
+
                 # ถ้าหลุดออกจากหน้า access.paylocity.com/duo หรือเข้าสู่ dashboard/portal แล้ว
                 if "escher" in current_url.lower() or "login.paylocity.com" in current_url.lower() or "punch" in current_url.lower() or "portal" in current_url.lower() or "workforce" in current_url.lower():
-                    # ตรวจสอบว่ามี element ของ Paylocity dashboard หรือไม่
-                    dashboard_elem = page.locator("text=Clock, text=Punch, text=Paylocity, [aria-label*='Clock' i], [aria-label*='Punch' i]")
-                    if await dashboard_elem.count() > 0:
-                        approved = True
-                        logger.info("Duo approval detected! Redirected to Paylocity portal.")
-                        break
+                    approved = True
+                    logger.info("Duo approval detected! Redirecting to Paylocity portal.")
+                    break
                 await asyncio.sleep(3)
 
             if not approved:
@@ -182,23 +220,77 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 await browser.close()
                 return {"success": False, "message": err_msg}
 
-            # 4. ค้นหาและกดปุ่ม Clock In หรือ Clock Out
-            logger.info(f"Looking for {action} button...")
-            await asyncio.sleep(3)
+            # Step 8: รอให้หน้าหลัก Paylocity โหลดเสร็จสมบูรณ์
+            logger.info("Step 8: Waiting for Paylocity main dashboard to load...")
+            await asyncio.sleep(5)
+
+            # ตรวจสอบเผื่อมี popup ข้ามอีกรอบในหน้าหลัก
+            post_login_skip = page.locator("button:has-text('Remind me later'), button:has-text('Dismiss'), button:has-text('Not now'), button:has-text('Close'), [aria-label='Close' i]")
+            if await post_login_skip.count() > 0 and await post_login_skip.first.is_visible():
+                await post_login_skip.first.click()
+                await asyncio.sleep(2)
+
+            # Step 9: เลื่อนหน้าจอหาปุ่ม Clock In หรือ Clock Out
+            logger.info(f"Step 9: Scrolling and looking for {action} button...")
+            # เลื่อนหน้าจอลงเล็กน้อยเพื่อให้เห็นวิดเจ็ตลงเวลา
+            await page.evaluate("window.scrollTo(0, 300)")
+            await asyncio.sleep(1)
 
             if action == "clock_in":
-                punch_btn = page.locator("button:has-text('Clock In'), a:has-text('Clock In'), [aria-label='Clock In' i], [title='Clock In' i]")
+                punch_selectors = [
+                    "button:has-text('Clock In')",
+                    "a:has-text('Clock In')",
+                    "button:has-text('Clock-In')",
+                    "a:has-text('Clock-In')",
+                    "button:has-text('Clock-in')",
+                    "a:has-text('Clock-in')",
+                    "[aria-label*='Clock In' i]",
+                    "[aria-label*='Clock-In' i]",
+                    "[title*='Clock In' i]",
+                    "text=Clock In",
+                    "text=Clock-In"
+                ]
             else:
-                punch_btn = page.locator("button:has-text('Clock Out'), a:has-text('Clock Out'), [aria-label='Clock Out' i], [title='Clock Out' i]")
+                punch_selectors = [
+                    "button:has-text('Clock Out')",
+                    "a:has-text('Clock Out')",
+                    "button:has-text('Clock-Out')",
+                    "a:has-text('Clock-Out')",
+                    "button:has-text('Clock-out')",
+                    "a:has-text('Clock-out')",
+                    "[aria-label*='Clock Out' i]",
+                    "[aria-label*='Clock-Out' i]",
+                    "[title*='Clock Out' i]",
+                    "text=Clock Out",
+                    "text=Clock-Out"
+                ]
 
             button_found = False
-            if await punch_btn.count() > 0 and await punch_btn.first.is_visible():
-                logger.info(f"Found {action} button directly, clicking...")
-                await punch_btn.first.click()
-                button_found = True
-            else:
+            for sel in punch_selectors:
+                loc = page.locator(sel)
+                if await loc.count() > 0 and await loc.first.is_visible():
+                    logger.info(f"Found {action} button with selector '{sel}', clicking...")
+                    await loc.first.scroll_into_view_if_needed()
+                    await loc.first.click()
+                    button_found = True
+                    break
+
+            if not button_found:
+                # ลองเลื่อนต่ออีกนิด
+                await page.evaluate("window.scrollTo(0, 600)")
+                await asyncio.sleep(1)
+                for sel in punch_selectors:
+                    loc = page.locator(sel)
+                    if await loc.count() > 0 and await loc.first.is_visible():
+                        logger.info(f"Found {action} button after scroll with selector '{sel}', clicking...")
+                        await loc.first.scroll_into_view_if_needed()
+                        await loc.first.click()
+                        button_found = True
+                        break
+
+            if not button_found:
                 # ลองค้นหาปุ่ม Punch ทั่วไป
-                generic_punch = page.locator("button:has-text('Punch'), [aria-label*='Punch' i]")
+                generic_punch = page.locator("button:has-text('Punch'), [aria-label*='Punch' i], [data-testid*='punch' i]")
                 if await generic_punch.count() > 0 and await generic_punch.first.is_visible():
                     logger.info("Found generic Punch button, clicking...")
                     await generic_punch.first.click()
