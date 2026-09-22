@@ -16,6 +16,165 @@ logger = logging.getLogger("paylocity_bot")
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
+
+def get_browser_context_config(profile: str = "macos_sequoia") -> Dict[str, Any]:
+    """
+    สร้าง User-Agent และ Client Hints ให้สอดคล้องกับ Duo Security OS Compliance Policy
+    ป้องกันการแจ้งเตือน 'macOS update required' หรือบล็อกเพราะ OS ตกรุ่น
+    """
+    profile = (profile or "macos_sequoia").lower()
+    
+    if "windows" in profile:
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+        sec_platform = '"Windows"'
+        platform_ver = '"15.0.0"'
+        client_platform = 'Windows'
+        client_arch = 'x86'
+    else:  # macos_sequoia (macOS 15.7.9 Sequoia)
+        user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
+        sec_platform = '"macOS"'
+        platform_ver = '"15.7.9"'
+        client_platform = 'macOS'
+        client_arch = 'arm'
+
+    extra_headers = {
+        "Sec-CH-UA": '"Chromium";v="127", "Google Chrome";v="127", "Not-A.Brand";v="99"',
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": sec_platform,
+        "Sec-CH-UA-Platform-Version": platform_ver,
+    }
+
+    js_override = f"""
+        // 1. Mask navigator.webdriver
+        Object.defineProperty(navigator, 'webdriver', {{ get: () => undefined }});
+
+        // 2. Client Hints / UserAgentData Override
+        const brands = [
+            {{ brand: 'Not-A.Brand', version: '99' }},
+            {{ brand: 'Chromium', version: '127' }},
+            {{ brand: 'Google Chrome', version: '127' }}
+        ];
+
+        if (!navigator.userAgentData) {{
+            navigator.userAgentData = {{
+                brands: brands,
+                mobile: false,
+                platform: '{client_platform}',
+                getHighEntropyValues: async function(hints) {{
+                    return {{
+                        brands: brands,
+                        mobile: false,
+                        platform: '{client_platform}',
+                        platformVersion: {platform_ver},
+                        architecture: '{client_arch}',
+                        bitness: '64',
+                        model: '',
+                        uaFullVersion: '127.0.6533.17',
+                        fullVersionList: brands
+                    }};
+                }}
+            }};
+        }} else {{
+            const originalGet = navigator.userAgentData.getHighEntropyValues ? navigator.userAgentData.getHighEntropyValues.bind(navigator.userAgentData) : null;
+            navigator.userAgentData.getHighEntropyValues = async function(hints) {{
+                let base = originalGet ? await originalGet(hints) : {{}};
+                return Object.assign(base, {{
+                    platform: '{client_platform}',
+                    platformVersion: {platform_ver},
+                    architecture: '{client_arch}',
+                    bitness: '64',
+                    model: ''
+                }});
+            }};
+            Object.defineProperty(navigator.userAgentData, 'platform', {{ get: () => '{client_platform}' }});
+        }}
+    """
+
+    return {
+        "user_agent": user_agent,
+        "extra_http_headers": extra_headers,
+        "js_override": js_override
+    }
+
+
+async def handle_duo_prompts(page) -> bool:
+    """
+    ตรวจจับและคลิกปุ่มต่างๆ ของ Duo Security (ทั้งใน main page และทุก iframe):
+    1. ปุ่ม Trust this browser / Yes, this is my device (หลัง Duo Approve)
+    2. ปุ่ม Skip for now / Remind me later / Dismiss / Update later / Not now
+    3. ปุ่ม Send Push (ถ้า Duo ยังไม่ส่งให้อัตโนมัติ หรือผู้ใช้ต้องกดเลือก Duo Push)
+    """
+    # 1. Action: Trust this browser (สำคัญมาก หลังกด Approve บนมือถือ)
+    trust_selectors = [
+        "button:has-text('Yes, trust browser')",
+        "button:has-text('Yes, this is my device')",
+        "button:has-text('Trust this browser')",
+        "button:has-text('Trust browser')",
+        "button:has-text('Trust this device')",
+        "button#trust-browser-button",
+        "button[data-testid='trust-browser-button']",
+        "button:has-text('Trust')"
+    ]
+
+    # 2. Action: Skip / Dismiss notices (กรณีมีหน้าต่างเตือนให้อัปเดตซอฟต์แวร์หรือแจ้งเตือนความปลอดภัย)
+    skip_selectors = [
+        "button:has-text('Skip for now')",
+        "a:has-text('Skip for now')",
+        "button:has-text('Remind me later')",
+        "a:has-text('Remind me later')",
+        "button:has-text('Update later')",
+        "a:has-text('Update later')",
+        "button:has-text('Dismiss')",
+        "a:has-text('Dismiss')",
+        "button:has-text('Not now')",
+        "a:has-text('Not now')",
+        "button:has-text('Skip')",
+        "a:has-text('Skip')",
+        "button:has-text('Continue')",
+        "button:has-text('Close')",
+        "button:has-text('ข้าม')",
+        "button:has-text('ภายหลัง')",
+        "[aria-label='Dismiss' i]",
+        "[aria-label='Close' i]"
+    ]
+
+    # 3. Action: Send Duo Push
+    push_selectors = [
+        "button:has-text('Send Me a Push')",
+        "button:has-text('Duo Push')",
+        "button:has-text('Send push')",
+        "button.auth-button[type='submit']"
+    ]
+
+    all_actions = [
+        ("Trust Browser", trust_selectors),
+        ("Skip Notice", skip_selectors),
+        ("Duo Push", push_selectors),
+    ]
+
+    try:
+        frames = page.frames
+    except Exception:
+        frames = [page]
+
+    for label, selectors in all_actions:
+        for selector in selectors:
+            for frame in frames:
+                try:
+                    locator = frame.locator(selector)
+                    count = await locator.count()
+                    if count > 0:
+                        btn = locator.first
+                        if await btn.is_visible():
+                            logger.info(f"Duo Handler: Found visible '{label}' button ({selector}), clicking...")
+                            await btn.click()
+                            await asyncio.sleep(1)
+                            return True
+                except Exception:
+                    pass
+    return False
+
+
 async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) -> Dict[str, Any]:
     """
     รันบอท Playwright เพื่อทำการ Clock In หรือ Clock Out
@@ -41,6 +200,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
     company_id = get_setting("company_id", "").strip()
     username = get_setting("username", "").strip()
     password = get_setting("password", "").strip()
+    browser_profile = get_setting("browser_profile", "macos_sequoia").strip()
 
     if not username or not password:
         err_msg = "ยังไม่ได้ระบุ Email หรือ Password ในเมนู Settings"
@@ -69,10 +229,13 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 "--disable-blink-features=AutomationControlled"
             ]
         )
+        browser_config = get_browser_context_config(browser_profile)
         context = await browser.new_context(
             viewport={"width": 1280, "height": 800},
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            user_agent=browser_config["user_agent"],
+            extra_http_headers=browser_config["extra_http_headers"]
         )
+        await context.add_init_script(browser_config["js_override"])
         page = await context.new_page()
 
         try:
@@ -193,14 +356,11 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 f"👉 กรุณาเปิดแอป Duo บนมือถือของคุณ แล้วกด 'Approve / ติ๊กถูก' ได้เลยครับ (ระบบกำลังรออยู่)"
             )
 
-            # ตรวจสอบหาปุ่ม Send Push ของ Duo เผื่อระบบไม่ได้ส่งอัตโนมัติ
+            # ตรวจสอบหาปุ่ม Send Push หรือจัดการ prompt ในเบื้องต้น (ทั้งหน้าหลักและทุก iframe)
             try:
-                duo_push_btn = page.locator("button:has-text('Send Me a Push'), button:has-text('Duo Push'), button:has-text('Push')")
-                if await duo_push_btn.count() > 0 and await duo_push_btn.first.is_visible():
-                    logger.info("Clicking Duo Send Push button...")
-                    await duo_push_btn.first.click()
+                await handle_duo_prompts(page)
             except Exception as e:
-                logger.debug(f"Duo push button search note: {e}")
+                logger.debug(f"Duo initial prompt handler note: {e}")
 
             # Step 7: รอผู้ใช้กดยืนยันตัวตนในแอป Duo (สูงสุด 120 วินาที)
             logger.info("Step 7: Waiting for Duo approval on user's phone (up to 120s)...")
@@ -209,19 +369,22 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
             while time.time() - start_wait < 120:
                 current_url = page.url
-                # ตรวจสอบการกดข้ามหน้าต่างแจ้งเตือน (เช่น ให้อัปเกรด iOS / OS / แจ้งเตือนความปลอดภัย)
-                skip_popups = page.locator(
-                    "button:has-text('Skip for now'), a:has-text('Skip for now'), "
-                    "button:has-text('Skip'), a:has-text('Skip'), "
-                    "button:has-text('Remind me later'), button:has-text('Dismiss'), "
-                    "button:has-text('Not now'), button:has-text('Continue'), "
-                    "button:has-text('Close'), button:has-text('Update later'), "
-                    "button:has-text('ข้าม'), button:has-text('ภายหลัง')"
-                )
-                if await skip_popups.count() > 0 and await skip_popups.first.is_visible():
-                    logger.info("Found upgrade/notice prompt, clicking skip/dismiss...")
-                    await skip_popups.first.click()
-                    await asyncio.sleep(2)
+
+                # ตรวจจับและคลิกปุ่มอัตโนมัติ (Trust this browser, Skip/Dismiss notices, Duo Push)
+                try:
+                    await handle_duo_prompts(page)
+                except Exception as e:
+                    logger.debug(f"Duo loop prompt error: {e}")
+
+                # ตรวจสอบปุ่ม 'Stay signed in?' (ถ้ามี เช่น Microsoft SSO)
+                try:
+                    stay_signed_in = page.locator("input#idSIButton9[value='Yes'], button:has-text('Yes'), button:has-text('Stay signed in')")
+                    if await stay_signed_in.count() > 0 and await stay_signed_in.first.is_visible():
+                        logger.info("Clicking 'Yes' on Stay signed in prompt...")
+                        await stay_signed_in.first.click()
+                        await asyncio.sleep(2)
+                except Exception:
+                    pass
 
                 # ถ้าหลุดออกจากหน้า access.paylocity.com/duo หรือเข้าสู่ dashboard/portal แล้ว
                 if "escher" in current_url.lower() or "login.paylocity.com" in current_url.lower() or "punch" in current_url.lower() or "portal" in current_url.lower() or "workforce" in current_url.lower():
@@ -230,7 +393,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                     # แจ้งเตือนใน LINE ว่าได้รับ Approve แล้ว
                     send_line_message(f"👍 [Paylocity] ตรวจพบการ Approve จาก Duo แล้ว!\nกำลังเข้าสู่หน้าหลักเพื่อกดลงเวลา {action_th}...")
                     break
-                await asyncio.sleep(3)
+                await asyncio.sleep(2)
 
             if not approved:
                 # แคปเจอร์หน้าจอตอนที่รอหมดเวลาเพื่อดูว่าติดตรงไหน
@@ -246,7 +409,12 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             logger.info("Step 8: Waiting for Paylocity main dashboard to load...")
             await asyncio.sleep(5)
 
-            # ตรวจสอบเผื่อมี popup ข้ามอีกรอบในหน้าหลัก
+            # ตรวจสอบเผื่อมี prompt ตกค้างหรือ popup ข้ามในหน้าหลัก
+            try:
+                await handle_duo_prompts(page)
+            except Exception:
+                pass
+
             post_login_skip = page.locator("button:has-text('Remind me later'), button:has-text('Dismiss'), button:has-text('Not now'), button:has-text('Close'), [aria-label='Close' i]")
             if await post_login_skip.count() > 0 and await post_login_skip.first.is_visible():
                 await post_login_skip.first.click()
