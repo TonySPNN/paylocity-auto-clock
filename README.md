@@ -1,3 +1,13 @@
+---
+title: Paylocity Auto Clock
+emoji: ⏰
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 🕒 Paylocity Auto Clock System
 
 ระบบช่วยลงเวลาเข้า-ออกงานอัตโนมัติบน Paylocity พร้อม **หน้าเว็บหลังบ้าน (Web Dashboard)** สำหรับตั้งเวลาล่วงหน้า, **ระบบโทรเข้ามือถือจริงเมื่อถึงเวลากด Duo 2FA**, และ **แจ้งเตือนพร้อมส่งรูปภาพผลลัพธ์ผ่าน LINE** 

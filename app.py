@@ -150,4 +150,5 @@ async def api_export_calendar():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 7860))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
