@@ -1,4 +1,6 @@
 import os
+import json
+import logging
 import asyncio
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
@@ -15,6 +17,8 @@ import paylocity_bot
 import voice_caller
 import line_service
 import calendar_export
+
+logger = logging.getLogger("app")
 
 # Lifespan
 @asynccontextmanager
@@ -144,6 +148,41 @@ async def api_test_call():
 async def api_test_line():
     result = line_service.send_line_message("🔔 ทดสอบการแจ้งเตือนจาก Paylocity Auto Clock! ระบบเชื่อมต่อ LINE สำเร็จเรียบร้อยครับ 🎉")
     return result
+
+# API Routes: LINE Webhook (Auto-capture User ID & auto-reply)
+@app.post("/api/line/webhook")
+async def api_line_webhook(request: Request):
+    body_bytes = await request.body()
+    signature = request.headers.get("X-Line-Signature", "")
+
+    # ตรวจสอบความถูกต้องของ signature
+    if not line_service.verify_signature(body_bytes, signature):
+        logger.warning("Invalid LINE webhook signature received.")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    try:
+        data = json.loads(body_bytes.decode("utf-8"))
+        events = data.get("events", [])
+        for event in events:
+            source = event.get("source", {})
+            user_id = source.get("userId")
+            reply_token = event.get("replyToken")
+
+            if user_id:
+                logger.info(f"Automatically captured LINE User ID: {user_id}")
+                database.update_settings({"line_user_id": user_id})
+
+                if reply_token:
+                    line_service.reply_line_message(
+                        reply_token,
+                        "🎉 เชื่อมต่อระบบ Paylocity Auto Clock สำเร็จแล้ว!\n"
+                        f"ระบบบันทึก User ID ของคุณเรียบร้อยแล้วครับ\n\n"
+                        "จากนี้ เมื่อถึงเวลาลงเวลาเข้า-ออกงาน บอทจะส่งข้อความแจ้งเตือน และส่งรูปภาพหลักฐานมาให้คุณในแชทนี้ครับ 😊"
+                    )
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error handling LINE webhook: {e}")
+        return {"status": "error", "message": str(e)}
 
 # API Routes: Export Google Calendar .ics
 @app.get("/api/calendar/export")

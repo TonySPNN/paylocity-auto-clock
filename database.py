@@ -61,6 +61,8 @@ def init_db():
             "twilio_auth_token": "",
             "twilio_from_number": "",        # e.g. +1...
             "line_enabled": "1",
+            "line_channel_id": "",
+            "line_channel_secret": "",
             "line_channel_access_token": "",
             "line_user_id": "",
             "timezone": "Asia/Bangkok"

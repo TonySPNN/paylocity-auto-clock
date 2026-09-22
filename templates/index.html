@@ -265,8 +265,14 @@
             <p class="text-[11px] text-slate-400 mt-1">อีเมลบริษัทที่ใช้ล็อกอินในหน้าถัดไป</p>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">รหัสผ่าน (Password)</label>
-            <input type="password" id="set-password" required placeholder="••••••••" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-700">รหัสผ่าน (Password)</label>
+              <button type="button" onclick="togglePasswordVisibility()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center">
+                <i class="fa-regular fa-eye mr-1" id="eye-icon"></i><span id="eye-text">แสดงรหัสผ่าน</span>
+              </button>
+            </div>
+            <input type="password" id="set-password" required placeholder="ใส่รหัสผ่านจริงของคุณที่นี่" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
+            <p class="text-[11px] text-slate-400 mt-1">กด "แสดงรหัสผ่าน" เพื่อตรวจสอบให้มั่นใจว่าเป็นรหัสจริงของคุณ</p>
           </div>
         </div>
 
@@ -275,22 +281,51 @@
           <div class="flex items-center justify-between">
             <h4 class="text-xs font-bold uppercase text-emerald-800 tracking-wider flex items-center space-x-1.5">
               <i class="fa-brands fa-line text-emerald-600 text-lg"></i>
-              <span>ระบบแจ้งเตือนผ่าน LINE (แนะนำ)</span>
+              <span>เชื่อมต่อ LINE อัตโนมัติผ่าน Webhook</span>
             </h4>
             <label class="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" id="set-line_enabled" checked class="sr-only peer">
               <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
             </label>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">LINE Channel Access Token</label>
-            <input type="password" id="set-line_channel_access_token" placeholder="วาง Channel Access Token จาก LINE Developers" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
+
+          <!-- Webhook URL Display Box -->
+          <div class="bg-white p-2.5 rounded-lg border border-emerald-200 space-y-1">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-semibold text-emerald-800">📌 ลิงก์ Webhook URL ของคุณ:</span>
+              <button type="button" onclick="copyWebhookUrl()" class="text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center space-x-1">
+                <i class="fa-regular fa-copy"></i><span>คัดลอกลิงก์</span>
+              </button>
+            </div>
+            <div id="webhook-url-display" class="text-[11px] font-mono text-slate-600 break-all select-all bg-slate-50 p-1.5 rounded border border-slate-100">
+              กำลังโหลด URL...
+            </div>
+            <p class="text-[10px] text-slate-500">นำไปวางใน LINE Developers Console (Messaging API > Webhook settings) แล้วกดเปิด "Use webhook"</p>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">LINE User ID (ของคุณ)</label>
-            <input type="text" id="set-line_user_id" placeholder="Uxxxxxxxx... จากแท็บ Basic Settings" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
-            <p class="text-[11px] text-slate-500 mt-1">บอทจะส่งข้อความบอกทุกสเต็ป: กำลังล็อกอิน ➡️ เตือนให้กด Duo ➡️ ยืนยันผลพร้อมรูปถ่าย</p>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Channel ID</label>
+              <input type="text" id="set-line_channel_id" placeholder="ตัวเลข 10 หลัก" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">ความลับแชนแนล (Channel Secret)</label>
+              <input type="password" id="set-line_channel_secret" placeholder="ตัวอักษร 32 ตัว" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
+            </div>
           </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">LINE User ID (บันทึกให้อัตโนมัติเมื่อทักบอท)</label>
+            <input type="text" id="set-line_user_id" placeholder="ระบบจะกรอกให้อัตโนมัติทันทีที่คุณส่งข้อความหาบอท หรือกรอกเองได้" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono bg-slate-50">
+            <p class="text-[11px] text-emerald-700 mt-1">✨ เพียงใส่ Channel ID, Channel Secret แล้วทักบอทใน LINE คำว่า "สวัสดี" ระบบจะจับคู่ User ID ให้อัตโนมัติทันทีครับ!</p>
+          </div>
+
+          <details class="text-xs text-slate-500 pt-1">
+            <summary class="cursor-pointer hover:text-indigo-600">ตัวเลือกเพิ่มเติม: Channel Access Token (กรณีไม่ใช้ OAuth)</summary>
+            <div class="mt-2">
+              <input type="password" id="set-line_channel_access_token" placeholder="Channel Access Token (เว้นว่างไว้ได้ถ้าระบุ Channel ID/Secret)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
+            </div>
+          </details>
         </div>
 
         <!-- Twilio Phone Call Section (ตัวเลือกเสริม ซ่อนไว้) -->
@@ -598,6 +633,30 @@
       loadSchedules();
     }
 
+    function togglePasswordVisibility() {
+      const passInput = document.getElementById('set-password');
+      const eyeIcon = document.getElementById('eye-icon');
+      const eyeText = document.getElementById('eye-text');
+      if (passInput.type === 'password') {
+        passInput.type = 'text';
+        eyeIcon.className = 'fa-regular fa-eye-slash mr-1';
+        eyeText.innerText = 'ซ่อนรหัสผ่าน';
+      } else {
+        passInput.type = 'password';
+        eyeIcon.className = 'fa-regular fa-eye mr-1';
+        eyeText.innerText = 'แสดงรหัสผ่าน';
+      }
+    }
+
+    function copyWebhookUrl() {
+      const webhookUrl = window.location.origin + '/api/line/webhook';
+      navigator.clipboard.writeText(webhookUrl).then(() => {
+        alert('คัดลอก Webhook URL เรียบร้อยแล้ว:\n' + webhookUrl);
+      }).catch(() => {
+        prompt('คัดลอก URL นี้:', webhookUrl);
+      });
+    }
+
     async function openSettingsModal() {
       const res = await fetch('/api/settings');
       const settings = await res.json();
@@ -607,15 +666,31 @@
       document.getElementById('set-username').value = settings.username || '';
       document.getElementById('set-password').value = settings.password || '';
 
+      // Reset password visibility
+      const passInput = document.getElementById('set-password');
+      passInput.type = 'password';
+      const eyeIcon = document.getElementById('eye-icon');
+      if (eyeIcon) eyeIcon.className = 'fa-regular fa-eye mr-1';
+      const eyeText = document.getElementById('eye-text');
+      if (eyeText) eyeText.innerText = 'แสดงรหัสผ่าน';
+
+      // Update Webhook URL display
+      const webhookDisplay = document.getElementById('webhook-url-display');
+      if (webhookDisplay) {
+        webhookDisplay.innerText = window.location.origin + '/api/line/webhook';
+      }
+
+      document.getElementById('set-line_enabled').checked = settings.line_enabled === '1';
+      document.getElementById('set-line_channel_id').value = settings.line_channel_id || '';
+      document.getElementById('set-line_channel_secret').value = settings.line_channel_secret || '';
+      document.getElementById('set-line_channel_access_token').value = settings.line_channel_access_token || '';
+      document.getElementById('set-line_user_id').value = settings.line_user_id || '';
+
       document.getElementById('set-voice_call_enabled').checked = settings.voice_call_enabled === '1';
       document.getElementById('set-phone_number').value = settings.phone_number || '';
       document.getElementById('set-twilio_account_sid').value = settings.twilio_account_sid || '';
       document.getElementById('set-twilio_auth_token').value = settings.twilio_auth_token || '';
       document.getElementById('set-twilio_from_number').value = settings.twilio_from_number || '';
-
-      document.getElementById('set-line_enabled').checked = settings.line_enabled === '1';
-      document.getElementById('set-line_channel_access_token').value = settings.line_channel_access_token || '';
-      document.getElementById('set-line_user_id').value = settings.line_user_id || '';
 
       document.getElementById('settingsModal').classList.remove('hidden');
     }
@@ -637,6 +712,8 @@
         twilio_auth_token: document.getElementById('set-twilio_auth_token').value,
         twilio_from_number: document.getElementById('set-twilio_from_number').value,
         line_enabled: document.getElementById('set-line_enabled').checked ? '1' : '0',
+        line_channel_id: document.getElementById('set-line_channel_id').value,
+        line_channel_secret: document.getElementById('set-line_channel_secret').value,
         line_channel_access_token: document.getElementById('set-line_channel_access_token').value,
         line_user_id: document.getElementById('set-line_user_id').value
       };

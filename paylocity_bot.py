@@ -144,11 +144,25 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                     await asyncio.sleep(2)
 
             # Step 5: กรอก Password
-            logger.info("Step 5: Looking for Password input...")
+            logger.info("Step 5: Locating Password input field...")
             pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd'], input#i0118")
             await pass_input.first.wait_for(state="visible", timeout=15000)
-            logger.info("Filling Password...")
-            await pass_input.first.fill(password)
+            
+            # คลิกเพื่อโฟกัสที่ช่องรหัสผ่าน
+            await pass_input.first.click()
+            await asyncio.sleep(0.3)
+
+            # เคลียร์ค่าที่อาจมีตกค้าง (เช่น จุดจำลอง, placeholder, หรือ autofill)
+            await page.keyboard.press("Control+A")
+            await page.keyboard.press("Backspace")
+            await pass_input.first.fill("")
+            await asyncio.sleep(0.2)
+
+            # พิมพ์รหัสผ่านจริงทีละตัวอักษร (delay 40ms) เพื่อให้ event ของเบราว์เซอร์รับค่าจริงแน่นอน 100%
+            real_pass = str(password).strip()
+            logger.info(f"Typing user real password (length: {len(real_pass)} chars)...")
+            await pass_input.first.press_sequentially(real_pass, delay=40)
+            await asyncio.sleep(0.5)
 
             # กดปุ่ม Login / Sign In
             login_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Sign In'), input[value='Login'], input[value='Sign in'], input#idSIButton9")
