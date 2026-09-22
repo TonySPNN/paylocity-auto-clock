@@ -77,34 +77,49 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             await page.goto(paylocity_url, wait_until="networkidle", timeout=60000)
             await asyncio.sleep(2)
 
-            # 1. กรอกข้อมูลล็อกอิน
-            # ตรวจสอบว่ามีช่อง Company ID หรือไม่
-            company_input = page.locator("input#CompanyId, input[name='CompanyId'], input[placeholder*='Company' i]")
-            if await company_input.count() > 0 and await company_input.first.is_visible():
-                if company_id:
+            # 1. กรอกข้อมูลล็อกอิน & ตรวจสอบปุ่ม Single Sign-On (SSO)
+            logger.info("Checking for SSO or Login form...")
+
+            # หากมีปุ่ม SSO ให้กดเข้าสู่ระบบผ่าน SSO ทันที
+            sso_btn = page.locator("button:has-text('Single Sign-On'), a:has-text('Single Sign-On'), button:has-text('SSO'), a:has-text('SSO'), [aria-label*='SSO' i], [data-testid*='sso' i]")
+            if await sso_btn.count() > 0 and await sso_btn.first.is_visible():
+                logger.info("Found Single Sign-On (SSO) button, clicking...")
+                await sso_btn.first.click()
+                await asyncio.sleep(2)
+
+            # ตรวจสอบว่ามีช่อง Company ID หรือไม่ (ถ้ามีค่าค่อยกรอก)
+            if company_id:
+                company_input = page.locator("input#CompanyId, input[name='CompanyId'], input[placeholder*='Company' i]")
+                if await company_input.count() > 0 and await company_input.first.is_visible():
                     logger.info("Filling Company ID...")
                     await company_input.first.fill(company_id)
 
-            # กรอก Username
-            user_input = page.locator("input#Username, input[name='Username'], input[type='email'], input[placeholder*='User' i]")
+            # กรอก Email / Username
+            user_input = page.locator("input[type='email'], input#Username, input[name='Username'], input[name='loginfmt'], input#identification, input[name='identifier'], input[placeholder*='Email' i], input[placeholder*='User' i]")
             if await user_input.count() > 0 and await user_input.first.is_visible():
-                logger.info("Filling Username...")
+                logger.info("Filling Email/Username...")
                 await user_input.first.fill(username)
 
-            # กด Next หากมี (กรณี Multi-step login)
-            next_btn = page.locator("button:has-text('Next'), button:has-text('Continue'), input[value='Next']")
-            if await next_btn.count() > 0 and await next_btn.first.is_visible():
-                await next_btn.first.click()
-                await asyncio.sleep(2)
+            # ตรวจสอบว่าช่อง Password ปรากฏอยู่บนหน้าจอแล้วหรือไม่
+            pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd']")
+            pass_visible = await pass_input.count() > 0 and await pass_input.first.is_visible()
+
+            # หากเป็นระบบล็อกอินแบบ 2 สเต็ป (เช่น Microsoft / Okta ที่ต้องกด Next ก่อนกรอกรหัส)
+            if not pass_visible:
+                next_btn = page.locator("button:has-text('Next'), input[value='Next'], button:has-text('Continue'), input#idSIButton9, button[type='submit']")
+                if await next_btn.count() > 0 and await next_btn.first.is_visible():
+                    logger.info("Clicking Next to proceed to password...")
+                    await next_btn.first.click()
+                    await asyncio.sleep(2)
 
             # กรอก Password
-            pass_input = page.locator("input#Password, input[name='Password'], input[type='password']")
+            pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd']")
             if await pass_input.count() > 0 and await pass_input.first.is_visible():
                 logger.info("Filling Password...")
                 await pass_input.first.fill(password)
 
-            # กดปุ่ม Login / Sign In
-            login_btn = page.locator("button[type='submit'], button:has-text('Log In'), button:has-text('Sign In'), input[value='Login']")
+            # กดปุ่ม Login / Sign In / Submit
+            login_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Sign In'), input[value='Login'], input[value='Sign in'], input#idSIButton9")
             if await login_btn.count() > 0 and await login_btn.first.is_visible():
                 logger.info("Clicking Login button...")
                 await login_btn.first.click()
@@ -112,6 +127,13 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 await page.keyboard.press("Enter")
 
             await asyncio.sleep(3)
+
+            # จัดการหน้าต่าง 'Stay signed in?' (ถ้ามี เช่น Microsoft SSO)
+            stay_signed_in = page.locator("input#idSIButton9[value='Yes'], button:has-text('Yes'), button:has-text('Stay signed in')")
+            if await stay_signed_in.count() > 0 and await stay_signed_in.first.is_visible():
+                logger.info("Clicking 'Yes' on Stay signed in prompt...")
+                await stay_signed_in.first.click()
+                await asyncio.sleep(2)
 
             # 2. ตรวจจับหน้า Duo Security 2FA
             logger.info("Checking for Duo 2FA prompt...")
