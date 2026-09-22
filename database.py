@@ -106,7 +106,7 @@ def init_db():
         
         # Default Settings
         default_settings = {
-            "paylocity_url": "https://access.paylocity.com/?client_id=56400b1e4bab4790b909ace559dadbc1&redirect_uri=https%3a%2f%2flogin.paylocity.com%2fEscher%2fEscher_WebUI%2fMembership.IdentityManager%2fReturn&response_mode=form_post&response_type=code&scope=openid+profile+offline_access+security%3acredential%3acreate+security%3acredential%3aupdate+security%3acredential%3adelete+security%3acompanysecuritysettings%3acreate+security%3acompanysecuritysettings%3adelete",
+            "paylocity_url": "https://access.paylocity.com/",
             "company_id": "",
             "username": "",
             "password": "",
@@ -131,6 +131,13 @@ def init_db():
         for k, v in default_settings.items():
             cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
             
+        # Migrate paylocity_url if it contains legacy Escher redirect
+        cursor.execute("""
+            UPDATE settings 
+            SET value = 'https://access.paylocity.com/' 
+            WHERE key = 'paylocity_url' AND (value LIKE '%Escher%' OR value LIKE '%redirect_uri%')
+        """)
+
         conn.commit()
 
 # Settings Helpers
@@ -141,7 +148,10 @@ def get_setting(key: str, default: str = "") -> str:
     with get_db() as conn:
         row = conn.cursor().execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         if row and row["value"]:
-            return row["value"]
+            val = row["value"]
+            if key == "paylocity_url" and ("escher" in val.lower() or "redirect_uri" in val.lower()):
+                return "https://access.paylocity.com/"
+            return val
         return default
 
 def get_all_settings() -> Dict[str, str]:

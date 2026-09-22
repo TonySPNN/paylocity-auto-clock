@@ -263,6 +263,8 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
     # อ่านค่าการตั้งค่าจาก SQLite
     paylocity_url = get_setting("paylocity_url", "https://access.paylocity.com/").strip()
+    if "escher" in paylocity_url.lower() or "redirect_uri" in paylocity_url.lower():
+        paylocity_url = "https://access.paylocity.com/"
     company_id = get_setting("company_id", "").strip()
     username = get_setting("username", "").strip()
     password = get_setting("password", "").strip()
@@ -504,29 +506,33 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 await browser.close()
                 return {"success": False, "message": err_msg}
 
-            # Step 8: รอให้หน้าหลัก Paylocity โหลดเสร็จสมบูรณ์
-            logger.info("Step 8: Waiting for Paylocity main dashboard to load...")
-            await record_step(history_id, page, "[สเต็ป 7/7] กำลังโหลดหน้าหลัก Paylocity Dashboard...", take_screenshot=True)
-            
-            try:
-                await page.wait_for_load_state("domcontentloaded", timeout=15000)
-            except Exception:
-                pass
+            # Step 8: รอให้เข้าสู่หน้าหลัก Dashboard (go.paylocity.com)
+            logger.info("Step 8: Waiting for redirect to Paylocity main dashboard...")
+            await record_step(history_id, page, "[สเต็ป 7/7] 👍 ได้รับการ Approve จาก Duo แล้ว กำลังโหลดหน้าหลัก Paylocity...", take_screenshot=True)
+
+            # รอ 3-4 วินาทีให้กระบวนการเปลี่ยนเส้นทาง / Token exchange เสร็จสิ้น
             await asyncio.sleep(4)
 
-            # ตรวจสอบเผื่อมี prompt ตกค้างหรือ popup ข้ามในหน้าหลัก
+            # ตรวจสอบ URL ปัจจุบัน: ถ้าไม่ได้อยู่ที่ go.paylocity.com หรือถ้าหลุดไปหน้า Employee Timesheet / Escher
+            # ให้นำทางตรงเข้าสู่ https://go.paylocity.com/ ทันที เพราะเซสชันผ่านการยืนยันตัวตนแล้ว
+            current_url = page.url.lower()
+            if "go.paylocity.com" not in current_url:
+                logger.info(f"Current page is at '{page.url}'. Navigating directly to https://go.paylocity.com/ ...")
+                await record_step(history_id, page, "[สเต็ป 7/7] กำลังเข้าสู่หน้าหลัก Dashboard (go.paylocity.com)...", take_screenshot=True)
+                try:
+                    await page.goto("https://go.paylocity.com/", wait_until="domcontentloaded", timeout=30000)
+                except Exception as e:
+                    logger.warning(f"Navigate to go.paylocity.com note: {e}")
+
+            # รอให้เนื้อหาบนหน้า Dashboard เรนเดอร์เสร็จสมบูรณ์ (ป้องกันการแคปเจอร์จอขาว)
+            logger.info("Waiting for dashboard widgets (Time card) to render...")
             try:
-                await handle_duo_prompts(page)
+                await page.wait_for_selector("text=/Time|Community|Clocked/i", timeout=25000)
             except Exception:
                 pass
 
-            post_login_skip = page.locator("button:has-text('Remind me later'), button:has-text('Dismiss'), button:has-text('Not now'), button:has-text('Close'), [aria-label='Close' i]")
-            if await post_login_skip.count() > 0 and await post_login_skip.first.is_visible():
-                try:
-                    await post_login_skip.first.click()
-                    await asyncio.sleep(2)
-                except Exception:
-                    pass
+            await asyncio.sleep(2)
+            await record_step(history_id, page, "[สเต็ป 7/7] หน้าหลัก Paylocity โหลดเสร็จสมบูรณ์แล้ว...", take_screenshot=True)
 
             # Step 9: เลื่อนหน้าจอไปยังการ์ด Time และค้นหาปุ่ม Clock in / Clock out
             logger.info(f"Step 9: Scrolling and looking for {action} button in Time widget...")
@@ -555,7 +561,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             # วนลูปตรวจสอบสูงสุด 20 วินาทีเพื่อให้เวลาหน้าเว็บโหลดและเรนเดอร์ข้อมูลการ์ด Time
             search_start = time.time()
             while time.time() - search_start < 20:
-                # 1. ค้นหาด้วย Playwright get_by_role (ดีที่สุดสำหรับ Accessible Web Component)
+                # 1. ค้นหาด้วย Playwright get_by_role('button') (แม่นยำที่สุด)
                 target_btn = page.get_by_role("button", name=target_re)
                 if await target_btn.count() > 0 and await target_btn.first.is_visible():
                     logger.info(f"Found target button '{target_text}' via get_by_role, clicking...")
@@ -567,31 +573,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                     clicked_btn_text = target_text
                     break
 
-                # 2. ค้นหาด้วย Selector ข้อความและ Attribute
-                selectors = [
-                    f"button:has-text('{target_text}')",
-                    f"[role='button']:has-text('{target_text}')",
-                    f"button:has-text('{target_text.title()}')",
-                    f"[role='button']:has-text('{target_text.title()}')",
-                    f"[aria-label*='{target_text}' i]"
-                ]
-                for sel in selectors:
-                    loc = page.locator(sel)
-                    if await loc.count() > 0 and await loc.first.is_visible():
-                        logger.info(f"Found target button with selector '{sel}', clicking...")
-                        await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} แล้ว กำลังคลิก...", take_screenshot=True)
-                        await loc.first.scroll_into_view_if_needed()
-                        await asyncio.sleep(0.5)
-                        await loc.first.click()
-                        button_found = True
-                        clicked_btn_text = target_text
-                        break
-                if button_found:
-                    break
-
-                # 3. ค้นหาปุ่มที่อยู่ก่อนหน้าปุ่ม 'More' ในการ์ด Time
+                # 2. ค้นหาปุ่มที่อยู่ก่อนหน้าปุ่ม 'More' ในการ์ด Time (ใน container เดียวกัน)
                 try:
-                    more_btn = page.locator("button:has-text('More'), [role='button']:has-text('More')")
+                    more_btn = page.get_by_role("button", name=re.compile(r"^More$", re.I))
                     if await more_btn.count() > 0 and await more_btn.first.is_visible():
                         sibling_btn = more_btn.first.locator("xpath=preceding-sibling::button[1] | preceding-sibling::*[@role='button'][1]")
                         if await sibling_btn.count() > 0 and await sibling_btn.first.is_visible():
@@ -612,6 +596,24 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                     logger.debug(f"Note on More sibling search: {e}")
 
                 if already_punched:
+                    break
+
+                # 3. ค้นหาภายในกล่องการ์ด Time (จำกัดขอบเขตไม่ให้โดนเมนู Timesheet ด้านบน)
+                try:
+                    time_cards = page.locator("div, section, article").filter(has_text=re.compile(r"Clocked\s*(out|in)", re.I))
+                    if await time_cards.count() > 0:
+                        tc_btn = time_cards.last.get_by_role("button", name=target_re)
+                        if await tc_btn.count() > 0 and await tc_btn.first.is_visible():
+                            logger.info(f"Found button inside Time card, clicking...")
+                            await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} ในกล่อง Time กำลังคลิก...", take_screenshot=True)
+                            await tc_btn.first.click()
+                            button_found = True
+                            clicked_btn_text = target_text
+                            break
+                except Exception as e:
+                    logger.debug(f"Time card search error: {e}")
+
+                if button_found:
                     break
 
                 # 4. ตรวจสอบว่าปุ่มตรงข้ามแสดงอยู่แล้วหรือไม่ (เช่น ขอ Clock In แต่ปุ่มเป็น Clock Out แปลว่าเข้างานอยู่แล้ว)
@@ -642,7 +644,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
                 await asyncio.sleep(1.5)
 
-            # 6. Fallback: JavaScript DOM Traverser (รองรับ Shadow DOM และ Custom Web Components)
+            # 6. Fallback: JavaScript DOM Traverser (เจาะจงเฉพาะ button และ [role='button'] เท่านั้น ไม่คลิกลิงก์ Timesheet)
             if not button_found and not already_punched:
                 logger.info("Trying JavaScript DOM traverser fallback...")
                 try:
@@ -660,9 +662,10 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                             }
                             const targetRegex = targetAction === 'clock_in' ? /^Clock\\s*in$/i : /^Clock\\s*out$/i;
                             const oppRegex = targetAction === 'clock_in' ? /^Clock\\s*out$/i : /^Clock\\s*in$/i;
-                            const clickables = queryAll('button, [role="button"], a, span, div');
+                            const clickables = queryAll('button, [role="button"]');
                             for (const el of clickables) {
                                 const txt = (el.innerText || el.textContent || '').trim();
+                                if (txt.toLowerCase().includes('timesheet') || txt.toLowerCase().includes('activity')) continue;
                                 if (targetRegex.test(txt)) {
                                     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                     const target = el.closest('button, [role="button"]') || el;
@@ -672,6 +675,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                             }
                             for (const el of clickables) {
                                 const txt = (el.innerText || el.textContent || '').trim();
+                                if (txt.toLowerCase().includes('timesheet') || txt.toLowerCase().includes('activity')) continue;
                                 if (oppRegex.test(txt)) {
                                     return { found: true, already: true, text: txt };
                                 }
