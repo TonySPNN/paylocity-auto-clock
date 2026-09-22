@@ -3,374 +3,579 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Paylocity Auto Clock - ระบบลงเวลาอัตโนมัติ</title>
+  <title>Paylocity Auto Clock & LINE OA Manager</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
     body { font-family: 'Prompt', sans-serif; }
+    .font-mono { font-family: 'Fira Code', monospace; }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen pb-12">
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
 
-  <!-- Top Navbar -->
-  <header class="bg-indigo-900 text-white shadow-md sticky top-0 z-30">
-    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="bg-indigo-600 p-2 rounded-xl text-white">
+  <!-- TOP NAVBAR -->
+  <header class="bg-indigo-900 text-white shadow-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center justify-between">
+      
+      <!-- Brand Logo -->
+      <div class="flex items-center space-x-3 cursor-pointer" onclick="switchTab('paylocity')">
+        <div class="bg-indigo-600 p-2 rounded-xl text-white shadow-sm">
           <i class="fa-solid fa-business-time text-2xl"></i>
         </div>
         <div>
-          <h1 class="text-xl font-bold leading-tight">Paylocity Auto Clock</h1>
-          <p class="text-xs text-indigo-200">ระบบลงเวลาเข้า-ออกงานอัตโนมัติ & แจ้งเตือน Duo</p>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-base sm:text-lg font-bold leading-tight">Paylocity & LINE Manager</h1>
+            <span class="bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">v2.0 Realtime</span>
+          </div>
+          <p class="text-[11px] text-indigo-200 hidden sm:block">ระบบลงเวลาอัตโนมัติ & ศูนย์รับส่งข้อความ LINE OA</p>
         </div>
       </div>
-      <div class="flex items-center space-x-2">
-        <a href="/api/calendar/export" download="paylocity_schedule.ics" class="hidden sm:inline-flex items-center px-3 py-1.5 bg-indigo-800 hover:bg-indigo-700 text-indigo-100 text-xs font-medium rounded-lg transition border border-indigo-600">
-          <i class="fa-solid fa-calendar-plus mr-1.5"></i> Google Calendar
-        </a>
-        <button onclick="openSettingsModal()" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition shadow-sm">
-          <i class="fa-solid fa-gear mr-1.5"></i> ตั้งค่าระบบ
+
+      <!-- Navigation Tabs -->
+      <nav class="flex items-center bg-indigo-950/60 p-1 rounded-xl border border-indigo-800/60 text-xs sm:text-sm font-medium">
+        <button id="nav-btn-paylocity" onclick="switchTab('paylocity')" class="px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 bg-indigo-600 text-white shadow-sm font-semibold">
+          <i class="fa-regular fa-clock"></i>
+          <span>ลงเวลา</span>
         </button>
+        <button id="nav-btn-chats" onclick="switchTab('chats')" class="px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 text-indigo-200 hover:text-white hover:bg-indigo-800/50">
+          <i class="fa-brands fa-line text-emerald-400 text-sm"></i>
+          <span>แชทลูกค้า (ChatList)</span>
+          <span id="chat-count-badge" class="hidden bg-emerald-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">0</span>
+        </button>
+        <button id="nav-btn-settings" onclick="switchTab('settings')" class="px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 text-indigo-200 hover:text-white hover:bg-indigo-800/50">
+          <i class="fa-solid fa-gear"></i>
+          <span>ตั้งค่า & Webhook</span>
+        </button>
+      </nav>
+
+      <!-- Right Quick Tools -->
+      <div class="hidden md:flex items-center space-x-2">
+        <a href="/api/calendar/export" download="paylocity_schedule.ics" class="inline-flex items-center px-2.5 py-1.5 bg-indigo-800/70 hover:bg-indigo-700 text-indigo-100 text-xs font-medium rounded-lg transition border border-indigo-700" title="ดาวน์โหลดไฟล์ .ics สำหรับ Google Calendar">
+          <i class="fa-solid fa-calendar-plus mr-1"></i> Calendar
+        </a>
       </div>
     </div>
   </header>
 
-  <!-- Main Container -->
-  <main class="max-w-6xl mx-auto px-4 py-6 space-y-6">
+  <!-- MAIN VIEWPORT CONTAINER -->
+  <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex-1">
 
-    <!-- Quick Action / Status Banner -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <!-- Fast Trigger: Clock In -->
-      <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center space-x-2">
-            <span class="p-2 bg-emerald-100 text-emerald-600 rounded-lg"><i class="fa-solid fa-right-to-bracket text-lg"></i></span>
-            <span class="font-bold text-slate-700">Clock In ทันที</span>
+    <!-- ============================================================= -->
+    <!-- TAB 1: PAYLOCITY CLOCK IN/OUT DASHBOARD                       -->
+    <!-- ============================================================= -->
+    <div id="tab-paylocity" class="space-y-6">
+      
+      <!-- Quick Action Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- Clock In -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center space-x-2">
+              <span class="p-2 bg-emerald-100 text-emerald-600 rounded-lg"><i class="fa-solid fa-right-to-bracket text-lg"></i></span>
+              <span class="font-bold text-slate-700">Clock In ทันที</span>
+            </div>
+            <span class="text-xs text-slate-400">Manual Punch</span>
           </div>
-          <span class="text-xs text-slate-400">Manual Punch</span>
-        </div>
-        <p class="text-xs text-slate-500 mb-4">สั่งบอทล็อกอินและกดลงเวลาเข้างานตอนนี้ พร้อมส่งสายโทรแจ้งเตือน Duo</p>
-        <button onclick="triggerPunch('clock_in')" id="btn-clock-in" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-semibold rounded-xl transition text-sm flex items-center justify-center space-x-2 shadow-sm">
-          <i class="fa-solid fa-play"></i>
-          <span>กด Clock In ตอนนี้</span>
-        </button>
-      </div>
-
-      <!-- Fast Trigger: Clock Out -->
-      <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center space-x-2">
-            <span class="p-2 bg-rose-100 text-rose-600 rounded-lg"><i class="fa-solid fa-right-from-bracket text-lg"></i></span>
-            <span class="font-bold text-slate-700">Clock Out ทันที</span>
-          </div>
-          <span class="text-xs text-slate-400">Manual Punch</span>
-        </div>
-        <p class="text-xs text-slate-500 mb-4">สั่งบอทล็อกอินและกดลงเวลาออกงานตอนนี้ พร้อมส่งสายโทรแจ้งเตือน Duo</p>
-        <button onclick="triggerPunch('clock_out')" id="btn-clock-out" class="w-full py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-semibold rounded-xl transition text-sm flex items-center justify-center space-x-2 shadow-sm">
-          <i class="fa-solid fa-stop"></i>
-          <span>กด Clock Out ตอนนี้</span>
-        </button>
-      </div>
-
-      <!-- Test LINE & Calendar -->
-      <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center space-x-2">
-            <span class="p-2 bg-emerald-100 text-emerald-600 rounded-lg"><i class="fa-brands fa-line text-xl"></i></span>
-            <span class="font-bold text-slate-700">แจ้งเตือน & ปฏิทิน</span>
-          </div>
-          <span class="text-xs text-slate-400">Utilities</span>
-        </div>
-        <div class="space-y-2 mb-4">
-          <button onclick="testLineMessage()" class="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition border border-emerald-200">
-            <i class="fa-brands fa-line text-base text-emerald-600"></i>
-            <span>ทดสอบส่งข้อความเข้า LINE</span>
+          <p class="text-xs text-slate-500 mb-4">สั่งบอทล็อกอิน SSO และกดลงเวลาเข้างานตอนนี้ พร้อมส่งข้อความเตือน Duo เข้า LINE</p>
+          <button onclick="triggerPunch('clock_in')" id="btn-clock-in" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-semibold rounded-xl transition text-sm flex items-center justify-center space-x-2 shadow-sm">
+            <i class="fa-solid fa-play"></i>
+            <span>กด Clock In ตอนนี้</span>
           </button>
-          <a href="/api/calendar/export" download="paylocity_schedule.ics" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition">
-            <i class="fa-solid fa-calendar-days text-indigo-600"></i>
-            <span>ดาวน์โหลด .ics เข้า Google Calendar</span>
-          </a>
         </div>
-        <div class="text-[11px] text-slate-400 text-center">
-          บอทจะส่งข้อความเตือนเข้า LINE เมื่อถึงเวลากด Duo
+
+        <!-- Clock Out -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center space-x-2">
+              <span class="p-2 bg-rose-100 text-rose-600 rounded-lg"><i class="fa-solid fa-right-from-bracket text-lg"></i></span>
+              <span class="font-bold text-slate-700">Clock Out ทันที</span>
+            </div>
+            <span class="text-xs text-slate-400">Manual Punch</span>
+          </div>
+          <p class="text-xs text-slate-500 mb-4">สั่งบอทล็อกอิน SSO และกดลงเวลาออกงานตอนนี้ พร้อมส่งข้อความเตือน Duo เข้า LINE</p>
+          <button onclick="triggerPunch('clock_out')" id="btn-clock-out" class="w-full py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-semibold rounded-xl transition text-sm flex items-center justify-center space-x-2 shadow-sm">
+            <i class="fa-solid fa-stop"></i>
+            <span>กด Clock Out ตอนนี้</span>
+          </button>
+        </div>
+
+        <!-- LINE & Calendar Utilities -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between hover:shadow-md transition">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center space-x-2">
+              <span class="p-2 bg-emerald-100 text-emerald-600 rounded-lg"><i class="fa-brands fa-line text-xl"></i></span>
+              <span class="font-bold text-slate-700">ทดสอบแจ้งเตือน LINE</span>
+            </div>
+            <span class="text-xs text-slate-400">LINE API</span>
+          </div>
+          <div class="space-y-2 mb-3">
+            <button onclick="testLineMessage()" class="w-full py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition border border-emerald-200">
+              <i class="fa-brands fa-line text-base text-emerald-600"></i>
+              <span>ทดสอบส่งข้อความเข้า LINE</span>
+            </button>
+            <button onclick="switchTab('chats')" class="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-semibold flex items-center justify-center space-x-2 transition border border-indigo-200">
+              <i class="fa-regular fa-comments text-indigo-600"></i>
+              <span>เปิดหน้าห้องแชท LINE OA</span>
+            </button>
+          </div>
+          <div class="text-[11px] text-slate-400 text-center">
+            บอทจะส่งข้อความแจ้งทุกขั้นตอน พร้อมรูปหลักฐานเข้า LINE
+          </div>
+        </div>
+      </div>
+
+      <!-- Schedules Section -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-slate-800 flex items-center space-x-2">
+              <i class="fa-regular fa-clock text-indigo-600"></i>
+              <span>ตารางเวลาที่ตั้งไว้ล่วงหน้า (Schedules)</span>
+            </h2>
+            <p class="text-xs text-slate-500">ระบบจะทำการล็อกอินและส่งข้อความเตือนให้กด Duo ตามเวลาเหล่านี้</p>
+          </div>
+          <button onclick="openScheduleModal()" class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition space-x-1.5">
+            <i class="fa-solid fa-plus"></i>
+            <span>เพิ่มตารางเวลาใหม่</span>
+          </button>
+        </div>
+
+        <div id="schedule-list" class="divide-y divide-slate-100">
+          <div class="p-8 text-center text-slate-400 text-sm">กำลังโหลดข้อมูล...</div>
+        </div>
+      </div>
+
+      <!-- Execution History & Screenshots Section -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-slate-800 flex items-center space-x-2">
+              <i class="fa-solid fa-history text-slate-600"></i>
+              <span>ประวัติการลงเวลา & ภาพหลักฐาน (History)</span>
+            </h2>
+            <p class="text-xs text-slate-500">บันทึกผลการกด Clock In/Out และภาพถ่ายหน้าจอย้อนหลัง</p>
+          </div>
+          <button onclick="loadHistories()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center space-x-1">
+            <i class="fa-solid fa-rotate-right"></i>
+            <span>รีเฟรช</span>
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm text-slate-600">
+            <thead class="bg-slate-50 text-xs uppercase font-semibold text-slate-500 border-b border-slate-100">
+              <tr>
+                <th class="px-5 py-3">เวลาที่รัน</th>
+                <th class="px-5 py-3">รายการ</th>
+                <th class="px-5 py-3">สถานะ</th>
+                <th class="px-5 py-3">ข้อความรายละเอียด</th>
+                <th class="px-5 py-3 text-center">ภาพถ่ายหน้าจอ</th>
+              </tr>
+            </thead>
+            <tbody id="history-table-body" class="divide-y divide-slate-100">
+              <tr><td colspan="5" class="px-5 py-8 text-center text-slate-400">กำลังโหลดข้อมูล...</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
 
-    <!-- Schedules Management Section -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div class="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-lg font-bold text-slate-800 flex items-center space-x-2">
-            <i class="fa-regular fa-clock text-indigo-600"></i>
-            <span>ตารางเวลาที่ตั้งไว้ล่วงหน้า (Schedules)</span>
-          </h2>
-          <p class="text-xs text-slate-500">บอทจะทำงานและโทรเข้ามือถือเพื่อกด Duo ตามเวลาเหล่านี้</p>
-        </div>
-        <button onclick="openScheduleModal()" class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-sm transition space-x-1.5">
-          <i class="fa-solid fa-plus"></i>
-          <span>เพิ่มตารางเวลาใหม่</span>
-        </button>
-      </div>
 
-      <!-- Schedule List -->
-      <div id="schedule-list" class="divide-y divide-slate-100">
-        <!-- Loaded via JavaScript -->
-        <div class="p-8 text-center text-slate-400 text-sm">กำลังโหลดข้อมูล...</div>
-      </div>
-    </div>
-
-    <!-- Execution History & Screenshots Section -->
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div class="p-5 border-b border-slate-100 flex items-center justify-between">
-        <div>
-          <h2 class="text-lg font-bold text-slate-800 flex items-center space-x-2">
-            <i class="fa-solid fa-history text-slate-600"></i>
-            <span>ประวัติการลงเวลา & ภาพหลักฐาน (History)</span>
-          </h2>
-          <p class="text-xs text-slate-500">บันทึกผลการกด Clock In/Out และภาพถ่ายหน้าจอย้อนหลัง</p>
-        </div>
-        <button onclick="loadHistories()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
-          <i class="fa-solid fa-rotate-right mr-1"></i> รีเฟรช
-        </button>
-      </div>
-
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm text-slate-600">
-          <thead class="bg-slate-50 text-xs uppercase font-semibold text-slate-500 border-b border-slate-100">
-            <tr>
-              <th class="px-5 py-3">เวลาที่รัน</th>
-              <th class="px-5 py-3">รายการ</th>
-              <th class="px-5 py-3">สถานะ</th>
-              <th class="px-5 py-3">ข้อความรายละเอียด</th>
-              <th class="px-5 py-3 text-center">ภาพถ่ายหน้าจอ</th>
-            </tr>
-          </thead>
-          <tbody id="history-table-body" class="divide-y divide-slate-100">
-            <tr><td colspan="5" class="px-5 py-8 text-center text-slate-400">กำลังโหลดประวัติ...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </main>
-
-  <!-- MODAL: Add / Edit Schedule -->
-  <div id="scheduleModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
-      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-        <h3 id="scheduleModalTitle" class="font-bold text-slate-800">เพิ่มตารางเวลาใหม่</h3>
-        <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
-      </div>
-      <form id="scheduleForm" onsubmit="saveSchedule(event)" class="p-6 space-y-4">
-        <input type="hidden" id="sch-id" value="">
+    <!-- ============================================================= -->
+    <!-- TAB 2: LINE OA CHATLIST & INBOX                               -->
+    <!-- ============================================================= -->
+    <div id="tab-chats" class="hidden">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col md:flex-row h-[750px]">
         
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">ชื่อรายการ (Label)</label>
-          <input type="text" id="sch-title" required placeholder="เช่น กะเช้า, วันทำงานปกติ" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">ประเภทการลงเวลา</label>
-          <div class="grid grid-cols-2 gap-3">
-            <label class="flex items-center space-x-2 border border-slate-200 p-2.5 rounded-xl cursor-pointer hover:bg-slate-50">
-              <input type="radio" name="sch-action" value="clock_in" checked class="text-indigo-600">
-              <span class="text-sm font-medium text-emerald-700">🟢 Clock In (เข้างาน)</span>
-            </label>
-            <label class="flex items-center space-x-2 border border-slate-200 p-2.5 rounded-xl cursor-pointer hover:bg-slate-50">
-              <input type="radio" name="sch-action" value="clock_out" class="text-indigo-600">
-              <span class="text-sm font-medium text-rose-700">🔴 Clock Out (ออกงาน)</span>
-            </label>
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">รูปแบบเวลา</label>
-          <div class="grid grid-cols-2 gap-3 mb-3">
-            <label class="flex items-center space-x-2 border border-slate-200 p-2 rounded-xl cursor-pointer hover:bg-slate-50 text-xs font-medium">
-              <input type="radio" name="sch-type" value="recurring" checked onchange="toggleScheduleTypeUI()" class="text-indigo-600">
-              <span>ประจำสัปดาห์ (Recurring)</span>
-            </label>
-            <label class="flex items-center space-x-2 border border-slate-200 p-2 rounded-xl cursor-pointer hover:bg-slate-50 text-xs font-medium">
-              <input type="radio" name="sch-type" value="date" onchange="toggleScheduleTypeUI()" class="text-indigo-600">
-              <span>ระบุวันเฉพาะ (Date)</span>
-            </label>
-          </div>
-
-          <!-- Specific Date Picker -->
-          <div id="date-picker-group" class="hidden">
-            <label class="block text-xs font-semibold text-slate-600 mb-1">วันที่ทำงาน (YYYY-MM-DD)</label>
-            <input type="date" id="sch-target-date" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500">
-          </div>
-
-          <!-- Days of Week Checkboxes -->
-          <div id="days-group" class="space-y-1">
-            <label class="block text-xs font-semibold text-slate-600 mb-1">วันที่ทำงานในสัปดาห์</label>
-            <div class="flex items-center justify-between text-xs">
-              <label class="flex items-center space-x-1"><input type="checkbox" name="sch-day" value="0" checked><span>จ</span></label>
-              <label class="flex items-center space-x-1"><input type="checkbox" name="sch-day" value="1" checked><span>อ</span></label>
-              <label class="flex items-center space-x-1"><input type="checkbox" name="sch-day" value="2" checked><span>พ</span></label>
-              <label class="flex items-center space-x-1"><input type="checkbox" name="sch-day" value="3" checked><span>พฤ</span></label>
-              <label class="flex items-center space-x-1"><input type="checkbox" name="sch-day" value="4" checked><span>ศ</span></label>
-              <label class="flex items-center space-x-1 text-slate-400"><input type="checkbox" name="sch-day" value="5"><span>ส</span></label>
-              <label class="flex items-center space-x-1 text-slate-400"><input type="checkbox" name="sch-day" value="6"><span>อา</span></label>
+        <!-- Left Pane: ChatList -->
+        <div class="w-full md:w-80 lg:w-96 border-r border-slate-200 flex flex-col bg-slate-50/50">
+          <!-- ChatList Header -->
+          <div class="p-4 border-b border-slate-200 bg-white">
+            <div class="flex items-center justify-between mb-2.5">
+              <div class="flex items-center space-x-2">
+                <i class="fa-brands fa-line text-emerald-600 text-xl"></i>
+                <h2 class="font-bold text-slate-800 text-sm sm:text-base">แชททั้งหมด (ChatList)</h2>
+              </div>
+              <div class="flex items-center space-x-1.5 text-xs text-emerald-600 font-medium">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Realtime</span>
+              </div>
+            </div>
+            <!-- Search -->
+            <div class="relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+              <input type="text" id="chat-search" oninput="filterChatList()" placeholder="ค้นหาชื่อ หรือ ID..." class="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
           </div>
+
+          <!-- Chat List Scrollable Items -->
+          <div id="chat-list-container" class="flex-1 overflow-y-auto divide-y divide-slate-100">
+            <div class="p-8 text-center text-slate-400 text-xs">กำลังโหลดห้องแชท...</div>
+          </div>
         </div>
 
-        <div>
-          <label class="block text-xs font-semibold text-slate-700 mb-1">เวลาเป้าหมาย (HH:MM)</label>
-          <input type="time" id="sch-target-time" required value="08:55" class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <p class="text-[11px] text-slate-400 mt-1">แนะนำให้ตั้งเวลาก่อนเวลาเข้างานจริง 2-5 นาที เพื่อให้ทันขั้นตอน Duo</p>
+        <!-- Right Pane: Active Conversation & Reply Box -->
+        <div class="flex-1 flex flex-col bg-white">
+          
+          <!-- Empty State (No chat selected) -->
+          <div id="chat-empty-state" class="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <div class="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-500 text-2xl mb-3 shadow-inner">
+              <i class="fa-regular fa-comments"></i>
+            </div>
+            <h3 class="font-bold text-slate-700 text-base mb-1">เลือกห้องแชทเพื่อเริ่มสนทนา</h3>
+            <p class="text-xs text-slate-400 max-w-sm">
+              เมื่อมีลูกค้าหรือผู้ใช้ทักเข้ามาทาง LINE OA ข้อความจะปรากฏในรายการด้านซ้ายแบบ Realtime คุณสามารถคลิกเพื่อดูประวัติและพิมพ์ตอบกลับได้ทันที
+            </p>
+          </div>
+
+          <!-- Active Chat View (Hidden until selected) -->
+          <div id="chat-active-state" class="hidden flex-1 flex flex-col h-full">
+            
+            <!-- Conversation Header -->
+            <div class="p-3.5 px-5 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+              <div class="flex items-center space-x-3">
+                <div id="active-chat-avatar-container" class="relative">
+                  <!-- Avatar Image / Placeholder -->
+                </div>
+                <div>
+                  <div class="flex items-center space-x-2">
+                    <h3 id="active-chat-name" class="font-bold text-slate-800 text-sm">ชื่อผู้ติดต่อ</h3>
+                    <span id="active-chat-badge" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">User</span>
+                  </div>
+                  <div id="active-chat-id" class="text-[11px] font-mono text-slate-400 select-all">Uxxxxxxxx...</div>
+                </div>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button onclick="refreshActiveChatProfile()" class="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium border border-slate-200 transition shadow-xs" title="ดึงข้อมูลชื่อและรูปโปรไฟล์ล่าสุดจาก LINE">
+                  <i class="fa-solid fa-arrows-rotate mr-1"></i> ดึงโปรไฟล์
+                </button>
+              </div>
+            </div>
+
+            <!-- Message Bubbles Container -->
+            <div id="chat-messages-container" class="flex-1 p-5 overflow-y-auto space-y-3.5 bg-slate-50/40">
+              <!-- Messages will load here -->
+            </div>
+
+            <!-- Reply Box (กล่องตอบแชทกลับหาลูกค้า) -->
+            <div class="p-3.5 bg-white border-t border-slate-200">
+              <form id="chat-reply-form" onsubmit="sendChatMessage(event)" class="flex items-end space-x-2">
+                <div class="flex-1 relative">
+                  <textarea id="chat-reply-input" rows="2" placeholder="พิมพ์ข้อความตอบกลับลูกค้าที่นี่... (กด Enter เพื่อส่ง, Shift+Enter เพื่อขึ้นบรรทัดใหม่)" class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white resize-none"></textarea>
+                </div>
+                <button type="submit" id="btn-send-reply" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-semibold rounded-xl text-xs sm:text-sm flex items-center space-x-1.5 transition shadow-sm h-[44px]">
+                  <i class="fa-solid fa-paper-plane"></i>
+                  <span>ส่ง</span>
+                </button>
+              </form>
+              <div class="flex items-center justify-between mt-1 text-[10px] text-slate-400 px-1">
+                <span>ข้อความจะถูกส่งผ่าน LINE Push Message API ไปยังแชทของลูกค้าโดยตรง</span>
+                <span id="reply-status-text"></span>
+              </div>
+            </div>
+
+          </div>
+
         </div>
 
-        <div class="pt-3 flex space-x-2">
-          <button type="button" onclick="closeScheduleModal()" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-xl text-sm transition">ยกเลิก</button>
-          <button type="submit" class="w-1/2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm transition shadow-sm">บันทึก</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- MODAL: Settings -->
-  <div id="settingsModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden">
-      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-        <h3 class="font-bold text-slate-800 flex items-center space-x-2">
-          <i class="fa-solid fa-sliders text-indigo-600"></i>
-          <span>ตั้งค่าระบบ (Settings)</span>
-        </h3>
-        <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
-      <form id="settingsForm" onsubmit="saveSettings(event)" class="p-6 space-y-5 overflow-y-auto flex-1">
+    </div>
+
+
+    <!-- ============================================================= -->
+    <!-- TAB 3: SETTINGS, CONNECTION TEST & WEBHOOK LOGS               -->
+    <!-- ============================================================= -->
+    <div id="tab-settings" class="hidden space-y-6">
+      
+      <!-- Grid: LINE Settings & Paylocity Settings -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        <!-- Paylocity Auth Section -->
-        <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
-          <h4 class="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center space-x-1.5">
-            <i class="fa-solid fa-lock text-indigo-600"></i>
-            <span>Paylocity Credentials</span>
-          </h4>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Paylocity Login URL</label>
-            <input type="text" id="set-paylocity_url" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
+        <!-- CARD 1: LINE OA Messaging API Settings -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 class="font-bold text-slate-800 text-base flex items-center space-x-2">
+              <i class="fa-brands fa-line text-emerald-600 text-2xl"></i>
+              <span>การเชื่อมต่อ LINE Official Account</span>
+            </h3>
+            <span class="text-xs text-emerald-600 font-semibold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">OAuth v2.1</span>
           </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Company ID (รหัสบริษัทของคุณ)</label>
-            <input type="text" id="set-company_id" required placeholder="เช่น 12345" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
-            <p class="text-[11px] text-slate-400 mt-1">รหัสบริษัทที่ใช้กรอกหลังกดปุ่ม SSO</p>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">อีเมลของคุณ (SSO Email)</label>
-            <input type="text" id="set-username" required placeholder="name@company.com" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
-            <p class="text-[11px] text-slate-400 mt-1">อีเมลบริษัทที่ใช้ล็อกอินในหน้าถัดไป</p>
-          </div>
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <label class="block text-xs font-semibold text-slate-700">รหัสผ่าน (Password)</label>
-              <button type="button" onclick="togglePasswordVisibility()" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center">
-                <i class="fa-regular fa-eye mr-1" id="eye-icon"></i><span id="eye-text">แสดงรหัสผ่าน</span>
+
+          <!-- Production Webhook URL Box -->
+          <div class="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-emerald-900 flex items-center space-x-1">
+                <i class="fa-solid fa-link text-emerald-600"></i>
+                <span>Webhook URL ของคุณ (Production Link)</span>
+              </span>
+              <button type="button" onclick="copyWebhookUrl()" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center space-x-1 bg-white px-2.5 py-1 rounded-lg border border-indigo-200 shadow-xs">
+                <i class="fa-regular fa-copy"></i>
+                <span>คัดลอกลิงก์</span>
               </button>
             </div>
-            <input type="password" id="set-password" required placeholder="ใส่รหัสผ่านจริงของคุณที่นี่" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
-            <p class="text-[11px] text-slate-400 mt-1">กด "แสดงรหัสผ่าน" เพื่อตรวจสอบให้มั่นใจว่าเป็นรหัสจริงของคุณ</p>
-          </div>
-        </div>
-
-        <!-- LINE Messaging API Section (ระบบแจ้งเตือนหลัก) -->
-        <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/40 space-y-3">
-          <div class="flex items-center justify-between">
-            <h4 class="text-xs font-bold uppercase text-emerald-800 tracking-wider flex items-center space-x-1.5">
-              <i class="fa-brands fa-line text-emerald-600 text-lg"></i>
-              <span>เชื่อมต่อ LINE อัตโนมัติผ่าน Webhook</span>
-            </h4>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="set-line_enabled" checked class="sr-only peer">
-              <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-
-          <!-- Webhook URL Display Box -->
-          <div class="bg-white p-2.5 rounded-lg border border-emerald-200 space-y-1">
-            <div class="flex items-center justify-between text-xs">
-              <span class="font-semibold text-emerald-800">📌 ลิงก์ Webhook URL ของคุณ:</span>
-              <button type="button" onclick="copyWebhookUrl()" class="text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center space-x-1">
-                <i class="fa-regular fa-copy"></i><span>คัดลอกลิงก์</span>
-              </button>
-            </div>
-            <div id="webhook-url-display" class="text-[11px] font-mono text-slate-600 break-all select-all bg-slate-50 p-1.5 rounded border border-slate-100">
+            <div id="tab-webhook-url-display" class="text-xs font-mono text-slate-700 bg-white p-2.5 rounded-lg border border-emerald-200 break-all select-all shadow-inner">
               กำลังโหลด URL...
             </div>
-            <p class="text-[10px] text-slate-500">นำไปวางใน LINE Developers Console (Messaging API > Webhook settings) แล้วกดเปิด "Use webhook"</p>
+            <p class="text-[11px] text-emerald-800 leading-relaxed">
+              นำลิงก์นี้ไปวางใน <a href="https://developers.line.biz/" target="_blank" class="underline font-semibold hover:text-emerald-950">LINE Developers Console</a> (Messaging API &gt; Webhook settings) แล้วกด <strong>Update</strong> จากนั้นเปิดสวิตช์ <strong>Use webhook</strong>
+            </p>
           </div>
 
-          <div class="grid grid-cols-2 gap-2">
+          <!-- Channel ID & Secret Inputs -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-semibold text-slate-700 mb-1">Channel ID</label>
-              <input type="text" id="set-line_channel_id" placeholder="ตัวเลข 10 หลัก" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
+              <input type="text" id="tabset-line_channel_id" placeholder="ตัวเลข 10 หลัก (Basic settings)" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500">
             </div>
             <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">ความลับแชนแนล (Channel Secret)</label>
-              <input type="password" id="set-line_channel_secret" placeholder="ตัวอักษร 32 ตัว" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Channel Secret (ความลับ)</label>
+              <input type="password" id="tabset-line_channel_secret" placeholder="ตัวอักษร 32 ตัว (Basic settings)" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500">
             </div>
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">LINE User ID (บันทึกให้อัตโนมัติเมื่อทักบอท)</label>
-            <input type="text" id="set-line_user_id" placeholder="ระบบจะกรอกให้อัตโนมัติทันทีที่คุณส่งข้อความหาบอท หรือกรอกเองได้" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono bg-slate-50">
-            <p class="text-[11px] text-emerald-700 mt-1">✨ เพียงใส่ Channel ID, Channel Secret แล้วทักบอทใน LINE คำว่า "สวัสดี" ระบบจะจับคู่ User ID ให้อัตโนมัติทันทีครับ!</p>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">LINE User ID สำหรับรับแจ้งเตือนหลัก</label>
+            <input type="text" id="tabset-line_user_id" placeholder="ระบบจะกรอกให้อัตโนมัติเมื่อส่งข้อความหาบอท หรือกรอกเองได้" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono bg-slate-50">
+            <p class="text-[11px] text-slate-400 mt-1">บอทจะส่งข้อความแจ้งเตือนให้กด Duo และส่งผลลงเวลามาที่ User ID นี้</p>
           </div>
 
           <details class="text-xs text-slate-500 pt-1">
-            <summary class="cursor-pointer hover:text-indigo-600">ตัวเลือกเพิ่มเติม: Channel Access Token (กรณีไม่ใช้ OAuth)</summary>
+            <summary class="cursor-pointer hover:text-indigo-600">ตัวเลือกเพิ่มเติม: Static Channel Access Token</summary>
             <div class="mt-2">
-              <input type="password" id="set-line_channel_access_token" placeholder="Channel Access Token (เว้นว่างไว้ได้ถ้าระบุ Channel ID/Secret)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
+              <input type="password" id="tabset-line_channel_access_token" placeholder="Channel Access Token (เว้นว่างไว้ได้ถ้าระบุ Channel ID/Secret)" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
             </div>
           </details>
+
+          <!-- Action Buttons -->
+          <div class="pt-2 flex flex-col sm:flex-row gap-2">
+            <button type="button" onclick="testLineConnection()" id="btn-test-connection" class="w-full sm:w-1/2 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 transition shadow-sm">
+              <i class="fa-solid fa-bolt"></i>
+              <span>ทดสอบการเชื่อมต่อบอท</span>
+            </button>
+            <button type="button" onclick="saveSettingsTab()" class="w-full sm:w-1/2 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-semibold rounded-xl text-xs sm:text-sm transition shadow-sm">
+              <i class="fa-regular fa-floppy-disk mr-1"></i> บันทึกการตั้งค่า
+            </button>
+          </div>
+
+          <!-- Connection Test Result Card -->
+          <div id="bot-connection-result" class="hidden p-3.5 rounded-xl border transition">
+            <!-- Dynamically populated -->
+          </div>
         </div>
 
-        <!-- Twilio Phone Call Section (ตัวเลือกเสริม ซ่อนไว้) -->
-        <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
-          <details class="text-xs">
-            <summary class="cursor-pointer font-semibold text-slate-600 hover:text-indigo-600 flex items-center justify-between">
-              <span class="flex items-center space-x-1.5">
-                <i class="fa-solid fa-phone text-blue-500"></i>
-                <span>ตัวเลือกเสริม: ระบบโทรเข้าเบอร์มือถือ (Twilio Voice)</span>
-              </span>
-              <span class="text-[10px] text-slate-400">ปิดไว้เป็นค่าเริ่มต้น (ไม่จำเป็น)</span>
-            </summary>
-            <div class="mt-3 space-y-3 pt-2 border-t border-slate-200">
-              <div class="flex items-center justify-between">
-                <span class="text-xs text-slate-600">เปิดใช้งานระบบโทรเข้ามือถือ</span>
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" id="set-voice_call_enabled" class="sr-only peer">
-                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                </label>
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 mb-1">เบอร์โทรศัพท์ของคุณ (+66...)</label>
-                <input type="text" id="set-phone_number" placeholder="+66812345678" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs">
-              </div>
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio Account SID</label>
-                  <input type="text" id="set-twilio_account_sid" placeholder="ACxxxxxxxx" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
-                </div>
-                <div>
-                  <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio Auth Token</label>
-                  <input type="password" id="set-twilio_auth_token" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
-                </div>
-              </div>
-              <div>
-                <label class="block text-xs font-semibold text-slate-700 mb-1">Twilio From Number</label>
-                <input type="text" id="set-twilio_from_number" placeholder="+1234567890" class="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-mono">
-              </div>
+        <!-- CARD 2: Paylocity SSO Settings -->
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+            <h3 class="font-bold text-slate-800 text-base flex items-center space-x-2">
+              <i class="fa-solid fa-key text-indigo-600 text-xl"></i>
+              <span>ข้อมูลเข้าสู่ระบบ Paylocity (SSO)</span>
+            </h3>
+            <span class="text-xs text-slate-400">Credentials</span>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Paylocity Login URL</label>
+            <input type="url" id="tabset-paylocity_url" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500">
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Company ID</label>
+            <input type="text" id="tabset-company_id" placeholder="รหัสบริษัท เช่น 94396" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Email บริษัท (Username)</label>
+            <input type="email" id="tabset-username" placeholder="name@company.com" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-700">รหัสผ่าน (Password)</label>
+              <button type="button" onclick="togglePasswordVisibility('tabset-password', 'eye-icon-tab', 'eye-text-tab')" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium inline-flex items-center">
+                <i class="fa-regular fa-eye mr-1" id="eye-icon-tab"></i><span id="eye-text-tab">แสดงรหัสผ่าน</span>
+              </button>
             </div>
-          </details>
+            <input type="password" id="tabset-password" placeholder="ใส่รหัสผ่านจริงของคุณที่นี่" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
+            <p class="text-[11px] text-slate-400 mt-1">ระบบพิมพ์รหัสผ่านจริงทีละตัวอักษรเพื่อความแม่นยำ 100%</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Timezone</label>
+            <input type="text" id="tabset-timezone" value="Asia/Bangkok" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono bg-slate-50">
+          </div>
+
+          <div class="pt-2">
+            <button type="button" onclick="saveSettingsTab()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-semibold rounded-xl text-xs sm:text-sm transition shadow-sm">
+              <i class="fa-regular fa-floppy-disk mr-1"></i> บันทึกการตั้งค่า Paylocity
+            </button>
+          </div>
         </div>
 
+      </div>
+
+      <!-- CARD 3: Webhook JSON Report (Realtime & Pagination) -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="flex items-center space-x-2">
+              <i class="fa-solid fa-network-wired text-indigo-600 text-lg"></i>
+              <h2 class="text-base sm:text-lg font-bold text-slate-800">รายงาน Webhook JSON จาก LINE (Realtime)</h2>
+              <span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-semibold">Live Logs</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">แสดงข้อมูลดิบ (Raw Payload) ทั้งหมดที่ LINE ส่งเข้ามายัง Webhook แบบเรียลไทม์ พร้อมตรวจสอบและดีบักได้ทันที</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="loadWebhookLogs(currentWebhookPage)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-medium transition inline-flex items-center space-x-1.5">
+              <i class="fa-solid fa-arrows-rotate"></i>
+              <span>รีเฟรชข้อมูล</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Webhook Logs Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs sm:text-sm text-slate-600">
+            <thead class="bg-slate-50 text-[11px] uppercase font-semibold text-slate-500 border-b border-slate-100">
+              <tr>
+                <th class="px-5 py-3">#</th>
+                <th class="px-5 py-3">เวลาที่ได้รับ</th>
+                <th class="px-5 py-3">ประเภท Event</th>
+                <th class="px-5 py-3">ผู้ส่ง / Source ID</th>
+                <th class="px-5 py-3">สถานะ</th>
+                <th class="px-5 py-3">พรีวิวข้อความ</th>
+                <th class="px-5 py-3 text-center">ดู Raw JSON</th>
+              </tr>
+            </thead>
+            <tbody id="webhook-logs-table-body" class="divide-y divide-slate-100">
+              <tr><td colspan="7" class="px-5 py-8 text-center text-slate-400 text-xs">กำลังโหลด Webhook Report...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Webhook Pagination Controls -->
+        <div class="p-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
+          <div id="webhook-pagination-info" class="text-xs text-slate-500">
+            กำลังโหลดข้อมูลหน้า...
+          </div>
+          <div id="webhook-pagination-buttons" class="flex items-center space-x-1.5">
+            <!-- Buttons generated dynamically -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+
+  <!-- ============================================================= -->
+  <!-- MODALS                                                        -->
+  <!-- ============================================================= -->
+
+  <!-- MODAL: Full Webhook JSON Viewer -->
+  <div id="webhookJsonModal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4" onclick="closeWebhookJsonModal()">
+    <div class="bg-slate-900 text-slate-100 rounded-2xl max-w-3xl w-full p-5 overflow-hidden shadow-2xl relative border border-slate-800" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+        <div class="flex items-center space-x-2">
+          <i class="fa-solid fa-code text-emerald-400"></i>
+          <h3 class="font-bold text-sm text-white">รายละเอียด Webhook JSON Payload (<span id="modal-json-log-id">#</span>)</h3>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="copyModalJson()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg text-xs font-semibold inline-flex items-center space-x-1 border border-slate-700">
+            <i class="fa-regular fa-copy"></i>
+            <span>คัดลอก JSON</span>
+          </button>
+          <button onclick="closeWebhookJsonModal()" class="text-slate-400 hover:text-white p-1">
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+      </div>
+      <div class="text-[11px] text-slate-400 mb-2 flex items-center justify-between">
+        <span id="modal-json-timestamp">Timestamp: -</span>
+        <span id="modal-json-event-types" class="bg-slate-800 text-indigo-300 px-2 py-0.5 rounded font-mono">events</span>
+      </div>
+      <pre id="modal-json-content" class="bg-slate-950 p-4 rounded-xl text-xs font-mono text-emerald-300 max-h-[60vh] overflow-y-auto border border-slate-800 select-all"></pre>
+    </div>
+  </div>
+
+  <!-- MODAL: Add / Edit Schedule -->
+  <div id="scheduleModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+      <div class="flex items-center justify-between mb-4 border-b pb-3 border-slate-100">
+        <h3 id="scheduleModalTitle" class="text-base font-bold text-slate-800">เพิ่มตารางเวลาใหม่</h3>
+        <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <form onsubmit="saveSchedule(event)" class="space-y-4">
+        <input type="hidden" id="sch-id">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">ชื่อรายการ (Title)</label>
+          <input type="text" id="sch-title" required placeholder="เช่น ลงเวลาเช้า จันทร์-ศุกร์" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">การกระทำ (Action)</label>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="flex items-center justify-center p-2.5 border rounded-xl cursor-pointer text-xs font-semibold text-emerald-700 border-emerald-200 bg-emerald-50 has-[:checked]:ring-2 has-[:checked]:ring-emerald-500">
+              <input type="radio" name="sch-action" value="clock_in" checked class="mr-2"> Clock In (เข้างาน)
+            </label>
+            <label class="flex items-center justify-center p-2.5 border rounded-xl cursor-pointer text-xs font-semibold text-rose-700 border-rose-200 bg-rose-50 has-[:checked]:ring-2 has-[:checked]:ring-rose-500">
+              <input type="radio" name="sch-action" value="clock_out" class="mr-2"> Clock Out (ออกงาน)
+            </label>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">เวลาทำงาน (HH:MM)</label>
+          <input type="time" id="sch-target-time" required value="08:55" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">รูปแบบการทำงาน</label>
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <label class="flex items-center justify-center p-2 border rounded-lg cursor-pointer text-xs font-medium text-slate-700 border-slate-200 bg-slate-50 has-[:checked]:border-indigo-600 has-[:checked]:bg-indigo-50 has-[:checked]:text-indigo-700">
+              <input type="radio" name="sch-type" value="recurring" checked onchange="toggleScheduleTypeUI()" class="mr-2"> ประจำสัปดาห์
+            </label>
+            <label class="flex items-center justify-center p-2 border rounded-lg cursor-pointer text-xs font-medium text-slate-700 border-slate-200 bg-slate-50 has-[:checked]:border-indigo-600 has-[:checked]:bg-indigo-50 has-[:checked]:text-indigo-700">
+              <input type="radio" name="sch-type" value="date" onchange="toggleScheduleTypeUI()" class="mr-2"> ระบุวันที่เจาะจง
+            </label>
+          </div>
+          <div id="days-group">
+            <label class="block text-[11px] text-slate-500 mb-1">เลือกวันที่ต้องการให้ทำงาน:</label>
+            <div class="grid grid-cols-7 gap-1 text-center">
+              <label class="cursor-pointer text-xs border border-slate-200 rounded-lg py-1.5 bg-slate-50 has-[:checked]:bg-indigo-600 has-[:checked]:text-white font-semibold">
+                <input type="checkbox" name="sch-day" value="0" checked class="hidden"> จ.
+              </label>
+              <label class="cursor-pointer text-xs border border-slate-200 rounded-lg py-1.5 bg-slate-50 has-[:checked]:bg-indigo-600 has-[:checked]:text-white font-semibold">
+                <input type="checkbox" name="sch-day" value="1" checked class="hidden"> อ.
+              </label>
+              <label class="cursor-pointer text-xs border border-slate-200 rounded-lg py-1.5 bg-slate-50 has-[:checked]:bg-indigo-600 has-[:checked]:text-white font-semibold">
+                <input type="checkbox" name="sch-day" value="2" checked class="hidden"> พ.
+              </label>
+              <label class="cursor-pointer text-xs border border-slate-200 rounded-lg py-1.5 bg-slate-50 has-[:checked]:bg-indigo-600 has-[:checked]:text-white font-semibold">
+                <input type="checkbox" name="sch-day" value="3" checked class="hidden"> พฤ.
+              </label>
+              <label class="cursor-pointer text-xs border border-slate-200 rounded-lg py-1.5 bg-slate-50 has-[:checked]:bg-indigo-600 has-[:checked]:text-white font-semibold">
+                <input type="checkbox" name="sch-day" value="4" checked class="hidden"> ศ.
+              </label>
+              <label class="cursor-pointer text-xs border border-slate-200 rounded-lg py-1.5 bg-slate-50 has-[:checked]:bg-indigo-600 has-[:checked]:text-white font-semibold">
+                <input type="checkbox" name="sch-day" value="5" class="hidden"> ส.
+              </label>
+              <label class="cursor-pointer text-xs border border-slate-200 rounded-lg py-1.5 bg-slate-50 has-[:checked]:bg-indigo-600 has-[:checked]:text-white font-semibold">
+                <input type="checkbox" name="sch-day" value="6" class="hidden"> อา.
+              </label>
+            </div>
+          </div>
+          <div id="date-picker-group" class="hidden">
+            <input type="date" id="sch-target-date" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono">
+          </div>
+        </div>
         <div class="pt-2 flex space-x-2">
-          <button type="button" onclick="closeSettingsModal()" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-xl text-sm transition">ยกเลิก</button>
-          <button type="submit" class="w-1/2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm transition shadow-sm">บันทึกการตั้งค่า</button>
+          <button type="button" onclick="closeScheduleModal()" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-xl text-xs transition">ยกเลิก</button>
+          <button type="submit" class="w-1/2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs transition shadow-sm">บันทึกตาราง</button>
         </div>
       </form>
     </div>
@@ -386,114 +591,151 @@
     </div>
   </div>
 
-  <!-- JavaScript Frontend Logic -->
+
+  <!-- JAVASCRIPT FRONTEND LOGIC -->
   <script>
     const DAY_NAMES = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
+    let currentTab = 'paylocity';
+    let currentWebhookPage = 1;
+    let allChats = [];
+    let activeChatId = null;
+    let rawModalJson = '';
 
-    async function loadSchedules() {
-      const res = await fetch('/api/schedules');
-      const data = await res.json();
-      const listEl = document.getElementById('schedule-list');
-      
-      if (!data.length) {
-        listEl.innerHTML = `<div class="p-8 text-center text-slate-400 text-sm">ยังไม่มีตารางเวลาที่ตั้งไว้ กดปุ่ม "เพิ่มตารางเวลาใหม่" ด้านบนเพื่อเริ่มต้น</div>`;
-        return;
-      }
-
-      listEl.innerHTML = data.map(sch => {
-        const isClockIn = sch.action === 'clock_in';
-        const actionBadge = isClockIn 
-          ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">🟢 Clock In</span>`
-          : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">🔴 Clock Out</span>`;
-
-        let timingDesc = '';
-        if (sch.schedule_type === 'date') {
-          timingDesc = `<span class="text-slate-600 font-medium">วันที่ ${sch.target_date || '-'}</span>`;
+    // ==========================================
+    // Tab Switching
+    // ==========================================
+    function switchTab(tab) {
+      currentTab = tab;
+      ['paylocity', 'chats', 'settings'].forEach(t => {
+        const tabEl = document.getElementById(`tab-${t}`);
+        const btnEl = document.getElementById(`nav-btn-${t}`);
+        if (t === tab) {
+          tabEl.classList.remove('hidden');
+          btnEl.className = 'px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 bg-indigo-600 text-white shadow-sm font-semibold';
         } else {
-          const days = (sch.days_of_week || '').split(',').map(d => DAY_NAMES[parseInt(d.trim())] || d).join(', ');
-          timingDesc = `<span class="text-slate-600 font-medium">ทุกวัน ${days || 'จันทร์-ศุกร์'}</span>`;
+          tabEl.classList.add('hidden');
+          btnEl.className = 'px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 text-indigo-200 hover:text-white hover:bg-indigo-800/50';
+        }
+      });
+
+      if (tab === 'chats') {
+        loadChatList();
+      } else if (tab === 'settings') {
+        loadSettingsTab();
+        loadWebhookLogs(1);
+      }
+    }
+
+    // ==========================================
+    // PAYLOCITY SCHEDULES & HISTORY
+    // ==========================================
+    async function loadSchedules() {
+      try {
+        const res = await fetch('/api/schedules');
+        const data = await res.json();
+        const listEl = document.getElementById('schedule-list');
+        
+        if (!data.length) {
+          listEl.innerHTML = `<div class="p-8 text-center text-slate-400 text-sm">ยังไม่มีตารางเวลาที่ตั้งไว้ กดปุ่ม "เพิ่มตารางเวลาใหม่" ด้านบนเพื่อเริ่มต้น</div>`;
+          return;
         }
 
-        return `
-          <div class="p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/70 transition">
-            <div class="flex items-center space-x-4">
-              <div class="text-2xl font-black font-mono text-slate-800 tracking-tight bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-                ${sch.target_time}
-              </div>
-              <div>
-                <div class="flex items-center space-x-2 mb-1">
-                  <span class="font-bold text-slate-800 text-sm">${sch.title}</span>
-                  ${actionBadge}
+        listEl.innerHTML = data.map(sch => {
+          const isClockIn = sch.action === 'clock_in';
+          const actionBadge = isClockIn 
+            ? `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">🟢 Clock In</span>`
+            : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800">🔴 Clock Out</span>`;
+
+          let timingDesc = '';
+          if (sch.schedule_type === 'date') {
+            timingDesc = `<span class="text-slate-600 font-medium">วันที่ ${sch.target_date || '-'}</span>`;
+          } else {
+            const days = (sch.days_of_week || '').split(',').map(d => DAY_NAMES[parseInt(d.trim())] || d).join(', ');
+            timingDesc = `<span class="text-slate-600 font-medium">ทุกวัน ${days || 'จันทร์-ศุกร์'}</span>`;
+          }
+
+          return `
+            <div class="p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/70 transition">
+              <div class="flex items-center space-x-4">
+                <div class="text-2xl font-black font-mono text-slate-800 tracking-tight bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                  ${sch.target_time}
                 </div>
-                <div class="text-xs text-slate-500">${timingDesc}</div>
+                <div>
+                  <div class="flex items-center space-x-2 mb-1">
+                    <span class="font-bold text-slate-800 text-sm">${sch.title}</span>
+                    ${actionBadge}
+                  </div>
+                  <div class="text-xs text-slate-500">${timingDesc}</div>
+                </div>
+              </div>
+
+              <div class="flex items-center space-x-3">
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" ${sch.is_enabled ? 'checked' : ''} onchange="toggleSchedule(${sch.id}, this.checked)" class="sr-only peer">
+                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+                <button onclick="editSchedule(${JSON.stringify(sch).replace(/"/g, '&quot;')})" class="p-2 text-slate-400 hover:text-indigo-600 transition">
+                  <i class="fa-regular fa-pen-to-square"></i>
+                </button>
+                <button onclick="deleteSchedule(${sch.id})" class="p-2 text-slate-400 hover:text-rose-600 transition">
+                  <i class="fa-regular fa-trash-can"></i>
+                </button>
               </div>
             </div>
-
-            <div class="flex items-center space-x-3">
-              <!-- Toggle Enabled -->
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" ${sch.is_enabled ? 'checked' : ''} onchange="toggleSchedule(${sch.id}, this.checked)" class="sr-only peer">
-                <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
-              </label>
-
-              <!-- Edit -->
-              <button onclick="editSchedule(${JSON.stringify(sch).replace(/"/g, '&quot;')})" class="p-2 text-slate-400 hover:text-indigo-600 transition">
-                <i class="fa-regular fa-pen-to-square"></i>
-              </button>
-
-              <!-- Delete -->
-              <button onclick="deleteSchedule(${sch.id})" class="p-2 text-slate-400 hover:text-rose-600 transition">
-                <i class="fa-regular fa-trash-can"></i>
-              </button>
-            </div>
-          </div>
-        `;
-      }).join('');
+          `;
+        }).join('');
+      } catch (e) {
+        console.error('Error loadSchedules:', e);
+      }
     }
 
     async function loadHistories() {
-      const res = await fetch('/api/history');
-      const data = await res.json();
-      const tbody = document.getElementById('history-table-body');
+      try {
+        const res = await fetch('/api/history');
+        const data = await res.json();
+        const tbody = document.getElementById('history-table-body');
 
-      if (!data.length) {
-        tbody.innerHTML = `<tr><td colspan="5" class="px-5 py-8 text-center text-slate-400">ยังไม่มีประวัติการบันทึก</td></tr>`;
-        return;
-      }
-
-      tbody.innerHTML = data.map(h => {
-        const isClockIn = h.action === 'clock_in';
-        const actionBadge = isClockIn 
-          ? `<span class="text-xs font-semibold text-emerald-700">Clock In</span>`
-          : `<span class="text-xs font-semibold text-rose-700">Clock Out</span>`;
-
-        let statusBadge = '';
-        if (h.status === 'success') {
-          statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800"><i class="fa-solid fa-check mr-1"></i> สำเร็จ</span>`;
-        } else if (h.status === 'running') {
-          statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 animate-pulse"><i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังรัน</span>`;
-        } else if (h.status === 'warning') {
-          statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800"><i class="fa-solid fa-triangle-exclamation mr-1"></i> แจ้งเตือน</span>`;
-        } else {
-          statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800"><i class="fa-solid fa-xmark mr-1"></i> ล้มเหลว</span>`;
+        if (!data.length) {
+          tbody.innerHTML = `<tr><td colspan="5" class="px-5 py-8 text-center text-slate-400 text-xs">ยังไม่มีประวัติการบันทึก</td></tr>`;
+          return;
         }
 
-        const screenshotBtn = h.screenshot_path
-          ? `<button onclick="viewScreenshot('${h.screenshot_path}')" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center space-x-1"><i class="fa-regular fa-image"></i><span>ดูรูป</span></button>`
-          : `<span class="text-xs text-slate-300">-</span>`;
+        tbody.innerHTML = data.map(h => {
+          const isClockIn = h.action === 'clock_in';
+          const actionBadge = isClockIn 
+            ? `<span class="text-xs font-semibold text-emerald-700">Clock In</span>`
+            : `<span class="text-xs font-semibold text-rose-700">Clock Out</span>`;
 
-        const timeFormatted = new Date(h.executed_at).toLocaleString('th-TH');
+          let statusBadge = '';
+          if (h.status === 'success') {
+            statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800"><i class="fa-solid fa-check mr-1"></i> สำเร็จ</span>`;
+          } else if (h.status === 'running') {
+            statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 animate-pulse"><i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังรัน</span>`;
+          } else if (h.status === 'warning') {
+            statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800"><i class="fa-solid fa-triangle-exclamation mr-1"></i> แจ้งเตือน</span>`;
+          } else {
+            statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-800"><i class="fa-solid fa-xmark mr-1"></i> ล้มเหลว</span>`;
+          }
 
-        return `
-          <tr class="hover:bg-slate-50/70 transition">
-            <td class="px-5 py-3 text-xs text-slate-500 whitespace-nowrap">${timeFormatted}</td>
-            <td class="px-5 py-3 whitespace-nowrap">${actionBadge}</td>
-            <td class="px-5 py-3 whitespace-nowrap">${statusBadge}</td>
-            <td class="px-5 py-3 text-xs text-slate-600 max-w-xs truncate">${h.message || '-'}</td>
-            <td class="px-5 py-3 text-center whitespace-nowrap">${screenshotBtn}</td>
-          </tr>
-        `;
-      }).join('');
+          const screenshotBtn = h.screenshot_path
+            ? `<button onclick="viewScreenshot('${h.screenshot_path}')" class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center space-x-1"><i class="fa-regular fa-image"></i><span>ดูรูป</span></button>`
+            : `<span class="text-xs text-slate-300">-</span>`;
+
+          const timeFormatted = new Date(h.executed_at).toLocaleString('th-TH');
+
+          return `
+            <tr class="hover:bg-slate-50/70 transition">
+              <td class="px-5 py-3 text-xs text-slate-500 whitespace-nowrap">${timeFormatted}</td>
+              <td class="px-5 py-3 whitespace-nowrap">${actionBadge}</td>
+              <td class="px-5 py-3 whitespace-nowrap">${statusBadge}</td>
+              <td class="px-5 py-3 text-xs text-slate-600 max-w-xs truncate">${h.message || '-'}</td>
+              <td class="px-5 py-3 text-center whitespace-nowrap">${screenshotBtn}</td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error('Error loadHistories:', e);
+      }
     }
 
     async function triggerPunch(action) {
@@ -509,24 +751,13 @@
           body: JSON.stringify({ action })
         });
         const result = await res.json();
-        alert(result.message || 'ส่งคำสั่งเริ่มทำงานเรียบร้อยแล้ว โปรดรอโทรศัพท์และเปิดแอป Duo');
+        alert(result.message || 'ส่งคำสั่งเริ่มทำงานเรียบร้อยแล้ว โปรดเปิดแอป Duo เพื่อกด Approve เมื่อบอทแจ้งเตือน');
         loadHistories();
       } catch (e) {
         alert('เกิดข้อผิดพลาด: ' + e.message);
       } finally {
         btn.innerHTML = origHtml;
         btn.disabled = false;
-      }
-    }
-
-    async function testPhoneCall() {
-      if (!confirm('ต้องการให้ระบบทดสอบโทรเข้าเบอร์มือถือของคุณตอนนี้เลยใช่หรือไม่?')) return;
-      try {
-        const res = await fetch('/api/test-call', { method: 'POST' });
-        const data = await res.json();
-        alert(data.message);
-      } catch (e) {
-        alert('เกิดข้อผิดพลาด: ' + e.message);
       }
     }
 
@@ -540,7 +771,16 @@
       }
     }
 
-    // Modal helpers
+    function viewScreenshot(url) {
+      document.getElementById('modalScreenshotImg').src = url;
+      document.getElementById('screenshotModal').classList.remove('hidden');
+    }
+
+    function closeScreenshotModal() {
+      document.getElementById('screenshotModal').classList.add('hidden');
+    }
+
+    // Schedules Modals
     function openScheduleModal() {
       document.getElementById('sch-id').value = '';
       document.getElementById('sch-title').value = '';
@@ -601,7 +841,6 @@
       }
 
       const payload = { title, action, schedule_type, target_time, target_date, days_of_week };
-
       const url = id ? `/api/schedules/${id}` : '/api/schedules';
       const method = id ? 'PUT' : 'POST';
 
@@ -633,119 +872,548 @@
       loadSchedules();
     }
 
-    function togglePasswordVisibility() {
-      const passInput = document.getElementById('set-password');
-      const eyeIcon = document.getElementById('eye-icon');
-      const eyeText = document.getElementById('eye-text');
-      if (passInput.type === 'password') {
-        passInput.type = 'text';
-        eyeIcon.className = 'fa-regular fa-eye-slash mr-1';
-        eyeText.innerText = 'ซ่อนรหัสผ่าน';
-      } else {
-        passInput.type = 'password';
-        eyeIcon.className = 'fa-regular fa-eye mr-1';
-        eyeText.innerText = 'แสดงรหัสผ่าน';
+
+    // ==========================================
+    // TAB 2: LINE CHATLIST & CONVERSATION
+    // ==========================================
+    async function loadChatList() {
+      try {
+        const res = await fetch('/api/line/chats');
+        allChats = await res.json();
+        
+        // Update badge
+        const badge = document.getElementById('chat-count-badge');
+        if (allChats.length > 0) {
+          badge.innerText = allChats.length;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+
+        renderChatList(allChats);
+
+        // If an active chat is selected, reload its messages
+        if (activeChatId) {
+          loadActiveChatMessages(false);
+        }
+      } catch (e) {
+        console.error('Error loadChatList:', e);
+      }
+    }
+
+    function renderChatList(chats) {
+      const container = document.getElementById('chat-list-container');
+      if (!chats || chats.length === 0) {
+        container.innerHTML = `
+          <div class="p-8 text-center text-slate-400 text-xs">
+            <i class="fa-regular fa-comment-dots text-3xl mb-2 text-slate-300 block"></i>
+            ยังไม่มีผู้ใช้ทักเข้ามา<br>
+            ลองพิมพ์ "สวัสดี" หาบอทใน LINE เพื่อเริ่มต้น
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = chats.map(chat => {
+        const isSelected = chat.source_id === activeChatId;
+        const activeClass = isSelected ? 'bg-indigo-50 border-l-4 border-indigo-600' : 'hover:bg-slate-100/70';
+        
+        // Avatar
+        let avatarHtml = '';
+        if (chat.picture_url) {
+          avatarHtml = `<img src="${chat.picture_url}" alt="Avatar" class="w-10 h-10 rounded-full object-cover border border-slate-200 shadow-2xs">`;
+        } else {
+          const initial = chat.display_name ? chat.display_name.charAt(0).toUpperCase() : (chat.source_type === 'group' ? 'G' : 'U');
+          const bg = chat.source_type === 'group' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700';
+          avatarHtml = `<div class="w-10 h-10 rounded-full ${bg} flex items-center justify-center font-bold text-sm shadow-2xs">${initial}</div>`;
+        }
+
+        // Time format
+        let timeStr = '';
+        if (chat.last_message_at) {
+          const d = new Date(chat.last_message_at);
+          timeStr = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        const typeBadge = chat.source_type === 'group' 
+          ? `<span class="text-[9px] px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 font-semibold">กลุ่ม</span>` 
+          : `<span class="text-[9px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-700 font-semibold">บุคคล</span>`;
+
+        return `
+          <div onclick="selectChat('${chat.source_id}')" class="p-3.5 flex items-center space-x-3 cursor-pointer transition ${activeClass}">
+            <div class="relative shrink-0">
+              ${avatarHtml}
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between mb-0.5">
+                <div class="flex items-center space-x-1.5 truncate">
+                  <span class="font-bold text-slate-800 text-xs truncate">${chat.display_name || chat.source_id}</span>
+                  ${typeBadge}
+                </div>
+                <span class="text-[10px] text-slate-400 shrink-0 font-medium">${timeStr}</span>
+              </div>
+              <div class="text-[11px] text-slate-500 truncate">
+                ${chat.last_message || 'เริ่มการสนทนา'}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function filterChatList() {
+      const q = document.getElementById('chat-search').value.toLowerCase().trim();
+      if (!q) {
+        renderChatList(allChats);
+        return;
+      }
+      const filtered = allChats.filter(c => 
+        (c.display_name && c.display_name.toLowerCase().includes(q)) ||
+        (c.source_id && c.source_id.toLowerCase().includes(q)) ||
+        (c.last_message && c.last_message.toLowerCase().includes(q))
+      );
+      renderChatList(filtered);
+    }
+
+    async function selectChat(sourceId) {
+      activeChatId = sourceId;
+      document.getElementById('chat-empty-state').classList.add('hidden');
+      document.getElementById('chat-active-state').classList.remove('hidden');
+
+      // Update Active Header
+      const chat = allChats.find(c => c.source_id === sourceId);
+      if (chat) {
+        document.getElementById('active-chat-name').innerText = chat.display_name || chat.source_id;
+        document.getElementById('active-chat-id').innerText = chat.source_id;
+        document.getElementById('active-chat-badge').innerText = chat.source_type.toUpperCase();
+
+        const avatarContainer = document.getElementById('active-chat-avatar-container');
+        if (chat.picture_url) {
+          avatarContainer.innerHTML = `<img src="${chat.picture_url}" class="w-10 h-10 rounded-full object-cover border border-slate-200">`;
+        } else {
+          const initial = chat.display_name ? chat.display_name.charAt(0).toUpperCase() : 'U';
+          avatarContainer.innerHTML = `<div class="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm">${initial}</div>`;
+        }
+      }
+
+      renderChatList(allChats);
+      await loadActiveChatMessages(true);
+      document.getElementById('chat-reply-input').focus();
+    }
+
+    async function loadActiveChatMessages(autoScroll = false) {
+      if (!activeChatId) return;
+      try {
+        const res = await fetch(`/api/line/chats/${activeChatId}/messages`);
+        const data = await res.json();
+        const messages = data.messages || [];
+        const container = document.getElementById('chat-messages-container');
+
+        if (!messages.length) {
+          container.innerHTML = `
+            <div class="h-full flex items-center justify-center text-slate-400 text-xs">
+              ยังไม่มีข้อความในห้องนี้
+            </div>
+          `;
+          return;
+        }
+
+        const wasScrolledToBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 80;
+
+        container.innerHTML = messages.map(m => {
+          const isUser = m.sender_type === 'user';
+          const isBot = m.sender_type === 'bot';
+          const isAdmin = m.sender_type === 'admin';
+
+          const timeStr = new Date(m.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+
+          if (isUser) {
+            return `
+              <div class="flex items-start space-x-2.5 max-w-[85%]">
+                <div class="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-[10px] text-slate-600 font-bold shrink-0">
+                  <i class="fa-solid fa-user"></i>
+                </div>
+                <div>
+                  <div class="bg-white border border-slate-200 rounded-2xl rounded-tl-sm p-3 text-xs sm:text-sm text-slate-800 shadow-2xs leading-relaxed whitespace-pre-wrap">
+                    ${escapeHtml(m.content)}
+                  </div>
+                  <div class="text-[10px] text-slate-400 mt-1 pl-1">${timeStr}</div>
+                </div>
+              </div>
+            `;
+          } else {
+            const bgClass = isAdmin ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white';
+            const senderLabel = isAdmin ? 'แอดมิน (คุณ)' : 'บอทอัตโนมัติ';
+            return `
+              <div class="flex items-start justify-end space-x-2.5 max-w-[85%] ml-auto">
+                <div>
+                  <div class="${bgClass} rounded-2xl rounded-tr-sm p-3 text-xs sm:text-sm shadow-2xs leading-relaxed whitespace-pre-wrap">
+                    ${escapeHtml(m.content)}
+                  </div>
+                  <div class="text-[10px] text-slate-400 mt-1 pr-1 text-right">${senderLabel} • ${timeStr}</div>
+                </div>
+              </div>
+            `;
+          }
+        }).join('');
+
+        if (autoScroll || wasScrolledToBottom) {
+          container.scrollTop = container.scrollHeight;
+        }
+      } catch (e) {
+        console.error('Error loadActiveChatMessages:', e);
+      }
+    }
+
+    async function sendChatMessage(e) {
+      e.preventDefault();
+      if (!activeChatId) return;
+      const input = document.getElementById('chat-reply-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const btn = document.getElementById('btn-send-reply');
+      btn.disabled = true;
+      document.getElementById('reply-status-text').innerText = 'กำลังส่ง...';
+
+      try {
+        const res = await fetch(`/api/line/chats/${activeChatId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        const result = await res.json();
+        if (result.success) {
+          input.value = '';
+          document.getElementById('reply-status-text').innerText = 'ส่งสำเร็จแล้ว';
+          setTimeout(() => { document.getElementById('reply-status-text').innerText = ''; }, 3000);
+          await loadActiveChatMessages(true);
+          loadChatList();
+        } else {
+          alert('ไม่สามารถส่งข้อความได้: ' + (result.message || 'Error'));
+          document.getElementById('reply-status-text').innerText = 'เกิดข้อผิดพลาด';
+        }
+      } catch (err) {
+        alert('เกิดข้อผิดพลาดในการเชื่อมต่อ: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        input.focus();
+      }
+    }
+
+    // Support Enter to send
+    document.getElementById('chat-reply-input')?.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage(e);
+      }
+    });
+
+    async function refreshActiveChatProfile() {
+      if (!activeChatId) return;
+      try {
+        const res = await fetch(`/api/line/chats/${activeChatId}/refresh-profile`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          await loadChatList();
+          selectChat(activeChatId);
+        }
+      } catch (e) {
+        alert('ไม่สามารถดึงโปรไฟล์ได้: ' + e.message);
+      }
+    }
+
+
+    // ==========================================
+    // TAB 3: SETTINGS & WEBHOOK LOGS REPORT
+    // ==========================================
+    async function loadSettingsTab() {
+      try {
+        const res = await fetch('/api/settings');
+        const s = await res.json();
+
+        // LINE settings
+        document.getElementById('tabset-line_channel_id').value = s.line_channel_id || '';
+        document.getElementById('tabset-line_channel_secret').value = s.line_channel_secret || '';
+        document.getElementById('tabset-line_channel_access_token').value = s.line_channel_access_token || '';
+        document.getElementById('tabset-line_user_id').value = s.line_user_id || '';
+
+        // Webhook URL display
+        const prodWebhookUrl = window.location.origin + '/api/line/webhook';
+        document.getElementById('tab-webhook-url-display').innerText = prodWebhookUrl;
+
+        // Paylocity settings
+        document.getElementById('tabset-paylocity_url').value = s.paylocity_url || '';
+        document.getElementById('tabset-company_id').value = s.company_id || '';
+        document.getElementById('tabset-username').value = s.username || '';
+        document.getElementById('tabset-password').value = s.password || '';
+        document.getElementById('tabset-timezone').value = s.timezone || 'Asia/Bangkok';
+
+      } catch (e) {
+        console.error('Error loadSettingsTab:', e);
+      }
+    }
+
+    async function saveSettingsTab() {
+      const payload = {
+        line_channel_id: document.getElementById('tabset-line_channel_id').value.trim(),
+        line_channel_secret: document.getElementById('tabset-line_channel_secret').value.trim(),
+        line_channel_access_token: document.getElementById('tabset-line_channel_access_token').value.trim(),
+        line_user_id: document.getElementById('tabset-line_user_id').value.trim(),
+        paylocity_url: document.getElementById('tabset-paylocity_url').value.trim(),
+        company_id: document.getElementById('tabset-company_id').value.trim(),
+        username: document.getElementById('tabset-username').value.trim(),
+        password: document.getElementById('tabset-password').value.trim(),
+        timezone: document.getElementById('tabset-timezone').value.trim(),
+        line_enabled: '1'
+      };
+
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          alert('บันทึกการตั้งค่าเรียบร้อยแล้ว');
+        } else {
+          alert('เกิดข้อผิดพลาดในการบันทึกการตั้งค่า');
+        }
+      } catch (e) {
+        alert('เกิดข้อผิดพลาด: ' + e.message);
+      }
+    }
+
+    async function testLineConnection() {
+      // Auto-save settings first so test uses current values
+      await saveSettingsTab();
+
+      const btn = document.getElementById('btn-test-connection');
+      const origHtml = btn.innerHTML;
+      btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>กำลังทดสอบ...</span>`;
+      btn.disabled = true;
+
+      const resultBox = document.getElementById('bot-connection-result');
+      resultBox.classList.remove('hidden');
+      resultBox.innerHTML = `<div class="text-xs text-slate-500"><i class="fa-solid fa-spinner fa-spin mr-1.5"></i> กำลังตรวจสอบการเชื่อมต่อกับ LINE Platform...</div>`;
+
+      try {
+        const res = await fetch('/api/line/test-connection', { method: 'POST' });
+        const data = await res.json();
+
+        if (data.success && data.bot) {
+          const bot = data.bot;
+          resultBox.className = 'p-3.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900';
+          resultBox.innerHTML = `
+            <div class="flex items-center space-x-3">
+              <img src="${bot.pictureUrl || 'https://via.placeholder.com/48'}" alt="Bot" class="w-12 h-12 rounded-full object-cover border-2 border-emerald-400">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center space-x-2">
+                  <span class="font-bold text-sm text-emerald-950">${bot.displayName}</span>
+                  <span class="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full font-bold">ONLINE</span>
+                </div>
+                <div class="text-xs font-mono text-emerald-800">Basic ID: ${bot.basicId || '-'}</div>
+                <div class="text-[11px] text-emerald-700">Chat Mode: ${bot.chatMode || 'chat'} • Mark as read: ${bot.markAsReadMode || 'auto'}</div>
+              </div>
+            </div>
+            <div class="mt-2 text-[11px] text-emerald-800 bg-white/70 p-2 rounded-lg border border-emerald-200">
+              🎉 การเชื่อมต่อ LINE Messaging API สำเร็จเรียบร้อย! ระบบสามารถส่งและรับข้อความได้แล้ว
+            </div>
+          `;
+        } else {
+          resultBox.className = 'p-3.5 rounded-xl border border-rose-300 bg-rose-50 text-rose-900';
+          resultBox.innerHTML = `
+            <div class="flex items-start space-x-2">
+              <i class="fa-solid fa-triangle-exclamation text-rose-600 mt-0.5"></i>
+              <div>
+                <div class="font-bold text-xs text-rose-950">เชื่อมต่อไม่สำเร็จ:</div>
+                <div class="text-xs text-rose-800 mt-0.5">${data.message || 'โปรดตรวจสอบ Channel ID และ Channel Secret ให้ถูกต้อง'}</div>
+              </div>
+            </div>
+          `;
+        }
+      } catch (e) {
+        resultBox.className = 'p-3.5 rounded-xl border border-rose-300 bg-rose-50 text-rose-900';
+        resultBox.innerHTML = `<div class="text-xs text-rose-800">เกิดข้อผิดพลาดในการทดสอบ: ${e.message}</div>`;
+      } finally {
+        btn.innerHTML = origHtml;
+        btn.disabled = false;
       }
     }
 
     function copyWebhookUrl() {
-      const webhookUrl = window.location.origin + '/api/line/webhook';
-      navigator.clipboard.writeText(webhookUrl).then(() => {
-        alert('คัดลอก Webhook URL เรียบร้อยแล้ว:\n' + webhookUrl);
+      const url = window.location.origin + '/api/line/webhook';
+      navigator.clipboard.writeText(url).then(() => {
+        alert('คัดลอก Webhook URL เรียบร้อยแล้ว:\n' + url);
       }).catch(() => {
-        prompt('คัดลอก URL นี้:', webhookUrl);
+        prompt('คัดลอก URL นี้:', url);
       });
     }
 
-    async function openSettingsModal() {
-      const res = await fetch('/api/settings');
-      const settings = await res.json();
-      
-      document.getElementById('set-paylocity_url').value = settings.paylocity_url || '';
-      document.getElementById('set-company_id').value = settings.company_id || '';
-      document.getElementById('set-username').value = settings.username || '';
-      document.getElementById('set-password').value = settings.password || '';
-
-      // Reset password visibility
-      const passInput = document.getElementById('set-password');
-      passInput.type = 'password';
-      const eyeIcon = document.getElementById('eye-icon');
-      if (eyeIcon) eyeIcon.className = 'fa-regular fa-eye mr-1';
-      const eyeText = document.getElementById('eye-text');
-      if (eyeText) eyeText.innerText = 'แสดงรหัสผ่าน';
-
-      // Update Webhook URL display
-      const webhookDisplay = document.getElementById('webhook-url-display');
-      if (webhookDisplay) {
-        webhookDisplay.innerText = window.location.origin + '/api/line/webhook';
-      }
-
-      document.getElementById('set-line_enabled').checked = settings.line_enabled === '1';
-      document.getElementById('set-line_channel_id').value = settings.line_channel_id || '';
-      document.getElementById('set-line_channel_secret').value = settings.line_channel_secret || '';
-      document.getElementById('set-line_channel_access_token').value = settings.line_channel_access_token || '';
-      document.getElementById('set-line_user_id').value = settings.line_user_id || '';
-
-      document.getElementById('set-voice_call_enabled').checked = settings.voice_call_enabled === '1';
-      document.getElementById('set-phone_number').value = settings.phone_number || '';
-      document.getElementById('set-twilio_account_sid').value = settings.twilio_account_sid || '';
-      document.getElementById('set-twilio_auth_token').value = settings.twilio_auth_token || '';
-      document.getElementById('set-twilio_from_number').value = settings.twilio_from_number || '';
-
-      document.getElementById('settingsModal').classList.remove('hidden');
-    }
-
-    function closeSettingsModal() {
-      document.getElementById('settingsModal').classList.add('hidden');
-    }
-
-    async function saveSettings(e) {
-      e.preventDefault();
-      const payload = {
-        paylocity_url: document.getElementById('set-paylocity_url').value,
-        company_id: document.getElementById('set-company_id').value,
-        username: document.getElementById('set-username').value,
-        password: document.getElementById('set-password').value,
-        voice_call_enabled: document.getElementById('set-voice_call_enabled').checked ? '1' : '0',
-        phone_number: document.getElementById('set-phone_number').value,
-        twilio_account_sid: document.getElementById('set-twilio_account_sid').value,
-        twilio_auth_token: document.getElementById('set-twilio_auth_token').value,
-        twilio_from_number: document.getElementById('set-twilio_from_number').value,
-        line_enabled: document.getElementById('set-line_enabled').checked ? '1' : '0',
-        line_channel_id: document.getElementById('set-line_channel_id').value,
-        line_channel_secret: document.getElementById('set-line_channel_secret').value,
-        line_channel_access_token: document.getElementById('set-line_channel_access_token').value,
-        line_user_id: document.getElementById('set-line_user_id').value
-      };
-
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
-        alert('บันทึกการตั้งค่าเรียบร้อยแล้ว');
-        closeSettingsModal();
+    function togglePasswordVisibility(inputId, iconId, textId) {
+      const passInput = document.getElementById(inputId);
+      const icon = document.getElementById(iconId);
+      const text = document.getElementById(textId);
+      if (passInput.type === 'password') {
+        passInput.type = 'text';
+        if (icon) icon.className = 'fa-regular fa-eye-slash mr-1';
+        if (text) text.innerText = 'ซ่อนรหัสผ่าน';
       } else {
-        alert('เกิดข้อผิดพลาดในการบันทึกการตั้งค่า');
+        passInput.type = 'password';
+        if (icon) icon.className = 'fa-regular fa-eye mr-1';
+        if (text) text.innerText = 'แสดงรหัสผ่าน';
       }
     }
 
-    function viewScreenshot(url) {
-      document.getElementById('modalScreenshotImg').src = url;
-      document.getElementById('screenshotModal').classList.remove('hidden');
+
+    // ==========================================
+    // WEBHOOK JSON REPORT & PAGINATION
+    // ==========================================
+    async function loadWebhookLogs(page = 1) {
+      currentWebhookPage = page;
+      const tbody = document.getElementById('webhook-logs-table-body');
+      try {
+        const res = await fetch(`/api/line/webhook-logs?page=${page}&limit=10`);
+        const data = await res.json();
+        const logs = data.logs || [];
+
+        if (!logs.length) {
+          tbody.innerHTML = `<tr><td colspan="7" class="px-5 py-8 text-center text-slate-400 text-xs">ยังไม่มีประวัติ Webhook เข้ามา</td></tr>`;
+          document.getElementById('webhook-pagination-info').innerText = '0 รายการ';
+          document.getElementById('webhook-pagination-buttons').innerHTML = '';
+          return;
+        }
+
+        tbody.innerHTML = logs.map(l => {
+          const timeFormatted = new Date(l.received_at).toLocaleString('th-TH');
+          
+          let statusBadge = '';
+          if (l.status === 'verified') {
+            statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">VERIFY PING</span>`;
+          } else if (l.status === 'success') {
+            statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">SUCCESS</span>`;
+          } else {
+            statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">ERROR</span>`;
+          }
+
+          return `
+            <tr class="hover:bg-slate-50/80 transition font-mono">
+              <td class="px-5 py-2.5 text-slate-400 text-xs">#${l.id}</td>
+              <td class="px-5 py-2.5 text-slate-600 text-xs whitespace-nowrap font-sans">${timeFormatted}</td>
+              <td class="px-5 py-2.5">
+                <span class="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[11px] font-semibold">${escapeHtml(l.event_types || '-')}</span>
+              </td>
+              <td class="px-5 py-2.5 text-xs text-slate-500 max-w-[140px] truncate select-all">${escapeHtml(l.source_id || '-')}</td>
+              <td class="px-5 py-2.5 whitespace-nowrap">${statusBadge}</td>
+              <td class="px-5 py-2.5 text-xs text-slate-400 max-w-[200px] truncate font-sans">${escapeHtml(l.preview || '')}</td>
+              <td class="px-5 py-2.5 text-center whitespace-nowrap font-sans">
+                <button onclick="viewWebhookJson(${l.id})" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold inline-flex items-center space-x-1 border border-indigo-200 transition">
+                  <i class="fa-solid fa-magnifying-glass"></i>
+                  <span>ดู JSON เต็ม</span>
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        // Render Pagination Controls
+        const total = data.total || 0;
+        const totalPages = data.total_pages || 1;
+        const startIdx = (page - 1) * 10 + 1;
+        const endIdx = Math.min(page * 10, total);
+
+        document.getElementById('webhook-pagination-info').innerText = `แสดง ${startIdx}-${endIdx} จากทั้งหมด ${total} รายการ (หน้า ${page}/${totalPages})`;
+
+        let btnHtml = '';
+        if (page > 1) {
+          btnHtml += `<button onclick="loadWebhookLogs(${page - 1})" class="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold">◀ ก่อนหน้า</button>`;
+        }
+        for (let p = Math.max(1, page - 2); p <= Math.min(totalPages, page + 2); p++) {
+          const active = p === page ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200';
+          btnHtml += `<button onclick="loadWebhookLogs(${p})" class="px-2.5 py-1 border rounded-lg text-xs font-semibold ${active}">${p}</button>`;
+        }
+        if (page < totalPages) {
+          btnHtml += `<button onclick="loadWebhookLogs(${page + 1})" class="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold">ถัดไป ▶</button>`;
+        }
+        document.getElementById('webhook-pagination-buttons').innerHTML = btnHtml;
+
+      } catch (e) {
+        console.error('Error loadWebhookLogs:', e);
+      }
     }
 
-    function closeScreenshotModal() {
-      document.getElementById('screenshotModal').classList.add('hidden');
+    async function viewWebhookJson(logId) {
+      try {
+        const res = await fetch(`/api/line/webhook-logs/${logId}`);
+        const log = await res.json();
+        
+        document.getElementById('modal-json-log-id').innerText = '#' + log.id;
+        document.getElementById('modal-json-timestamp').innerText = 'Timestamp: ' + new Date(log.received_at).toLocaleString('th-TH');
+        document.getElementById('modal-json-event-types').innerText = log.event_types || 'event';
+
+        let formatted = log.payload;
+        try {
+          const parsed = JSON.parse(log.payload);
+          formatted = JSON.stringify(parsed, null, 2);
+        } catch (e) {}
+
+        rawModalJson = formatted;
+        document.getElementById('modal-json-content').innerText = formatted;
+        document.getElementById('webhookJsonModal').classList.remove('hidden');
+      } catch (e) {
+        alert('เกิดข้อผิดพลาดในการโหลด JSON: ' + e.message);
+      }
     }
 
-    // Init
+    function closeWebhookJsonModal() {
+      document.getElementById('webhookJsonModal').classList.add('hidden');
+    }
+
+    function copyModalJson() {
+      if (!rawModalJson) return;
+      navigator.clipboard.writeText(rawModalJson).then(() => {
+        alert('คัดลอก JSON เรียบร้อยแล้ว');
+      });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+
+    // ==========================================
+    // INITIALIZATION & REALTIME TIMERS
+    // ==========================================
     loadSchedules();
     loadHistories();
-    // Auto-refresh history every 15 seconds
-    setInterval(loadHistories, 15000);
+
+    // Auto-refresh schedules/history every 20s
+    setInterval(() => {
+      if (currentTab === 'paylocity') {
+        loadHistories();
+      }
+    }, 20000);
+
+    // Auto-refresh ChatList & Messages every 3 seconds when in 'chats' tab
+    setInterval(() => {
+      if (currentTab === 'chats') {
+        loadChatList();
+      }
+    }, 3000);
+
+    // Auto-refresh Webhook Logs every 5 seconds when in 'settings' tab
+    setInterval(() => {
+      if (currentTab === 'settings') {
+        loadWebhookLogs(currentWebhookPage);
+      }
+    }, 5000);
+
   </script>
 </body>
 </html>

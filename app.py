@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import asyncio
+from datetime import datetime
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 
@@ -60,6 +61,9 @@ class ToggleIn(BaseModel):
 
 class PunchIn(BaseModel):
     action: str
+
+class SendChatMsgIn(BaseModel):
+    text: str
 
 # Web Routes
 @app.get("/", response_class=HTMLResponse)
@@ -149,40 +153,232 @@ async def api_test_line():
     result = line_service.send_line_message("🔔 ทดสอบการแจ้งเตือนจาก Paylocity Auto Clock! ระบบเชื่อมต่อ LINE สำเร็จเรียบร้อยครับ 🎉")
     return result
 
-# API Routes: LINE Webhook (Auto-capture User ID & auto-reply)
+# Helper: Background Task to Sync LINE Chat Profile
+def sync_chat_profile(source_type: str, source_id: str):
+    try:
+        if source_type == "user":
+            res = line_service.get_user_profile(source_id)
+            if res.get("success"):
+                prof = res.get("profile", {})
+                database.update_chat_profile(
+                    source_id=source_id,
+                    display_name=prof.get("displayName", source_id),
+                    picture_url=prof.get("pictureUrl"),
+                    status_message=prof.get("statusMessage")
+                )
+        elif source_type == "group":
+            res = line_service.get_group_summary(source_id)
+            if res.get("success"):
+                summ = res.get("summary", {})
+                database.update_chat_profile(
+                    source_id=source_id,
+                    display_name=summ.get("groupName", f"กลุ่ม {source_id[:6]}"),
+                    picture_url=summ.get("pictureUrl")
+                )
+    except Exception as e:
+        logger.warning(f"Error sync_chat_profile: {e}")
+
+# API Routes: LINE Webhook (Auto-capture, Chat Logging, & Webhook Reports)
 @app.post("/api/line/webhook")
-async def api_line_webhook(request: Request):
+async def api_line_webhook(request: Request, background_tasks: BackgroundTasks):
     body_bytes = await request.body()
     signature = request.headers.get("X-Line-Signature", "")
 
-    # ตรวจสอบความถูกต้องของ signature
-    if not line_service.verify_signature(body_bytes, signature):
+    # 1. ตรวจสอบความถูกต้องของ signature
+    is_valid = line_service.verify_signature(body_bytes, signature)
+    if not is_valid:
         logger.warning("Invalid LINE webhook signature received.")
+        database.add_webhook_log(
+            event_types="invalid_signature",
+            source_id="unknown",
+            payload=body_bytes.decode("utf-8", errors="ignore"),
+            status="error"
+        )
         raise HTTPException(status_code=400, detail="Invalid signature")
 
+    raw_text = body_bytes.decode("utf-8", errors="ignore")
     try:
-        data = json.loads(body_bytes.decode("utf-8"))
-        events = data.get("events", [])
-        for event in events:
-            source = event.get("source", {})
-            user_id = source.get("userId")
-            reply_token = event.get("replyToken")
+        data = json.loads(raw_text) if raw_text else {}
+    except Exception:
+        data = {}
 
-            if user_id:
-                logger.info(f"Automatically captured LINE User ID: {user_id}")
-                database.update_settings({"line_user_id": user_id})
+    events = data.get("events", [])
+    event_types_list = []
+    primary_source_id = None
 
-                if reply_token:
-                    line_service.reply_line_message(
-                        reply_token,
-                        "🎉 เชื่อมต่อระบบ Paylocity Auto Clock สำเร็จแล้ว!\n"
-                        f"ระบบบันทึก User ID ของคุณเรียบร้อยแล้วครับ\n\n"
-                        "จากนี้ เมื่อถึงเวลาลงเวลาเข้า-ออกงาน บอทจะส่งข้อความแจ้งเตือน และส่งรูปภาพหลักฐานมาให้คุณในแชทนี้ครับ 😊"
-                    )
+    # Handle Webhook Verification ping from LINE Developers console
+    if not events:
+        database.add_webhook_log(
+            event_types="verify_ping",
+            source_id=data.get("destination", "verify"),
+            payload=raw_text,
+            status="verified"
+        )
         return {"status": "ok"}
-    except Exception as e:
-        logger.error(f"Error handling LINE webhook: {e}")
-        return {"status": "error", "message": str(e)}
+
+    for event in events:
+        ev_type = event.get("type", "unknown")
+        source = event.get("source", {})
+        source_type = source.get("type", "user")  # 'user', 'group', 'room'
+        source_id = source.get("userId") if source_type == "user" else (source.get("groupId") or source.get("roomId") or source.get("userId"))
+        sender_id = source.get("userId")
+        reply_token = event.get("replyToken")
+        timestamp_ms = event.get("timestamp")
+        timestamp_iso = datetime.fromtimestamp(timestamp_ms / 1000.0).isoformat() if timestamp_ms else datetime.now().isoformat()
+
+        if source_id:
+            primary_source_id = source_id
+
+        if ev_type == "message":
+            msg_obj = event.get("message", {})
+            msg_type = msg_obj.get("type", "text")
+            event_types_list.append(f"message:{msg_type}")
+
+            content = ""
+            if msg_type == "text":
+                content = msg_obj.get("text", "")
+            elif msg_type == "sticker":
+                content = f"🏷️ [สติกเกอร์]"
+            elif msg_type == "image":
+                content = "📷 [รูปภาพ]"
+            elif msg_type == "video":
+                content = "🎥 [วิดีโอ]"
+            elif msg_type == "audio":
+                content = "🎵 [ข้อความเสียง]"
+            elif msg_type == "location":
+                content = f"📍 [{msg_obj.get('title', 'ตำแหน่งที่ตั้ง')}]"
+            else:
+                content = f"[{msg_type}]"
+
+            if source_id:
+                # 1. บันทึก / อัปเดตห้องแชท
+                database.upsert_line_chat(source_type=source_type, source_id=source_id)
+
+                # 2. บันทึกข้อความเข้า line_messages
+                database.add_line_message(
+                    chat_id=source_id,
+                    sender_type="user",
+                    sender_id=sender_id,
+                    message_type=msg_type,
+                    content=content,
+                    raw_data=json.dumps(event, ensure_ascii=False),
+                    reply_token=reply_token,
+                    timestamp=timestamp_iso
+                )
+
+                # 3. ตรวจสอบว่ามีชื่อโปรไฟล์หรือยัง ถ้ายังไม่มีให้ดึงเบื้องหลัง
+                chat_info = database.get_line_chat(source_id)
+                if not chat_info or not chat_info.get("display_name"):
+                    background_tasks.add_task(sync_chat_profile, source_type, source_id)
+
+                # 4. หากเป็นผู้ใช้เดี่ยวและยังไม่มี line_user_id ใน settings ให้บันทึกเป็นผู้รับแจ้งเตือนหลัก
+                current_user_id = database.get_setting("line_user_id", "").strip()
+                if not current_user_id and source_type == "user":
+                    database.update_settings({"line_user_id": source_id})
+
+                # 5. ทักทายอัตโนมัติเมื่อพิมพ์คำทักทายครั้งแรก
+                if reply_token and reply_token not in ("00000000000000000000000000000000", "ffffffffffffffffffffffffffffffff"):
+                    t_lower = content.strip().lower()
+                    if t_lower in ["สวัสดี", "hello", "hi", "หวัดดี", "test", "ทดสอบ"]:
+                        reply_msg = (
+                            "🎉 เชื่อมต่อระบบสำเร็จแล้วครับ!\n"
+                            "ระบบบันทึกข้อความของคุณเรียบร้อยแล้ว\n"
+                            "แอดมินสามารถดูประวัติและตอบแชทกลับผ่านหน้าเว็บได้แบบเรียลไทม์ครับ 😊"
+                        )
+                        line_service.reply_line_message(reply_token, reply_msg)
+                        database.add_line_message(
+                            chat_id=source_id,
+                            sender_type="bot",
+                            sender_id="bot",
+                            message_type="text",
+                            content=reply_msg
+                        )
+
+        elif ev_type in ["follow", "join"]:
+            event_types_list.append(ev_type)
+            if source_id:
+                database.upsert_line_chat(source_type=source_type, source_id=source_id)
+                background_tasks.add_task(sync_chat_profile, source_type, source_id)
+                if reply_token and reply_token not in ("00000000000000000000000000000000", "ffffffffffffffffffffffffffffffff"):
+                    welcome_msg = "ยินดีต้อนรับครับ! ขอบคุณที่เพิ่มเพื่อนกับเรา 😊"
+                    line_service.reply_line_message(reply_token, welcome_msg)
+                    database.add_line_message(
+                        chat_id=source_id,
+                        sender_type="bot",
+                        sender_id="bot",
+                        message_type="text",
+                        content=welcome_msg
+                    )
+        else:
+            event_types_list.append(ev_type)
+
+    # บันทึก Raw Webhook Log ลงฐานข้อมูล
+    summary_types = ", ".join(event_types_list) if event_types_list else "event"
+    database.add_webhook_log(
+        event_types=summary_types,
+        source_id=primary_source_id,
+        payload=raw_text,
+        status="success"
+    )
+
+    return {"status": "ok"}
+
+# API Routes: LINE Bot Info & Connection Test
+@app.post("/api/line/test-connection")
+async def api_line_test_connection():
+    return line_service.get_bot_info()
+
+# API Routes: LINE Chats & Messages
+@app.get("/api/line/chats")
+async def api_get_line_chats():
+    return database.get_line_chats()
+
+@app.get("/api/line/chats/{source_id}/messages")
+async def api_get_line_chat_messages(source_id: str):
+    chat = database.get_line_chat(source_id)
+    messages = database.get_line_messages(source_id, limit=100)
+    return {"chat": chat, "messages": messages}
+
+@app.post("/api/line/chats/{source_id}/messages")
+async def api_send_line_chat_message(source_id: str, body: SendChatMsgIn):
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="ข้อความต้องไม่ว่างเปล่า")
+
+    # ส่งข้อความผ่าน LINE Push API
+    res = line_service.send_line_push_to(to_id=source_id, text=text)
+    if res.get("success"):
+        # บันทึกลง database
+        msg_id = database.add_line_message(
+            chat_id=source_id,
+            sender_type="admin",
+            sender_id="admin",
+            message_type="text",
+            content=text
+        )
+        return {"success": True, "message_id": msg_id, "message": "ส่งข้อความสำเร็จ"}
+    else:
+        return {"success": False, "message": res.get("message", "ส่งข้อความไม่สำเร็จ")}
+
+@app.post("/api/line/chats/{source_id}/refresh-profile")
+async def api_refresh_chat_profile(source_id: str):
+    chat = database.get_line_chat(source_id)
+    source_type = chat.get("source_type", "user") if chat else "user"
+    sync_chat_profile(source_type, source_id)
+    updated_chat = database.get_line_chat(source_id)
+    return {"success": True, "chat": updated_chat}
+
+# API Routes: Webhook Logs & JSON Report
+@app.get("/api/line/webhook-logs")
+async def api_get_webhook_logs(page: int = 1, limit: int = 10):
+    return database.get_webhook_logs(page=page, limit=limit)
+
+@app.get("/api/line/webhook-logs/{log_id}")
+async def api_get_webhook_log_detail(log_id: int):
+    log = database.get_webhook_log(log_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+    return log
 
 # API Routes: Export Google Calendar .ics
 @app.get("/api/calendar/export")

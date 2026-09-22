@@ -49,6 +49,49 @@ def init_db():
             )
         """)
         
+        # 4. LINE Chats Table (Rooms / Users)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS line_chats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT NOT NULL,       -- 'user', 'group', 'room'
+                source_id TEXT UNIQUE NOT NULL,  -- userId, groupId, or roomId
+                display_name TEXT,
+                picture_url TEXT,
+                status_message TEXT,
+                last_message TEXT,
+                last_message_at TEXT,
+                unread_count INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # 5. LINE Messages History Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS line_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL,           -- references source_id
+                sender_type TEXT NOT NULL,       -- 'user', 'admin', 'bot'
+                sender_id TEXT,
+                message_type TEXT NOT NULL,      -- 'text', 'image', 'sticker', 'system'
+                content TEXT,
+                raw_data TEXT,
+                reply_token TEXT,
+                timestamp TEXT NOT NULL
+            )
+        """)
+
+        # 6. LINE Webhook Raw Logs Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS line_webhook_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_types TEXT,
+                source_id TEXT,
+                payload TEXT NOT NULL,
+                status TEXT,                     -- 'success', 'verified', 'error'
+                received_at TEXT NOT NULL
+            )
+        """)
+        
         # Default Settings
         default_settings = {
             "paylocity_url": "https://access.paylocity.com/?client_id=56400b1e4bab4790b909ace559dadbc1&redirect_uri=https%3a%2f%2flogin.paylocity.com%2fEscher%2fEscher_WebUI%2fMembership.IdentityManager%2fReturn&response_mode=form_post&response_type=code&scope=openid+profile+offline_access+security%3acredential%3acreate+security%3acredential%3aupdate+security%3acredential%3adelete+security%3acompanysecuritysettings%3acreate+security%3acompanysecuritysettings%3adelete",
@@ -175,3 +218,117 @@ def get_histories(limit: int = 50) -> List[Dict[str, Any]]:
     with get_db() as conn:
         rows = conn.cursor().execute("SELECT * FROM history ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+# LINE Chat & Message Helpers
+def upsert_line_chat(source_type: str, source_id: str, display_name: Optional[str] = None,
+                     picture_url: Optional[str] = None, status_message: Optional[str] = None):
+    now = datetime.now().isoformat()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO line_chats (source_type, source_id, display_name, picture_url, status_message, created_at, last_message_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source_id) DO UPDATE SET
+                display_name = COALESCE(excluded.display_name, line_chats.display_name),
+                picture_url = COALESCE(excluded.picture_url, line_chats.picture_url),
+                status_message = COALESCE(excluded.status_message, line_chats.status_message)
+        """, (source_type, source_id, display_name, picture_url, status_message, now, now))
+        conn.commit()
+
+def update_chat_profile(source_id: str, display_name: str, picture_url: Optional[str] = None, status_message: Optional[str] = None):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE line_chats
+            SET display_name = ?, picture_url = COALESCE(?, picture_url), status_message = COALESCE(?, status_message)
+            WHERE source_id = ?
+        """, (display_name, picture_url, status_message, source_id))
+        conn.commit()
+
+def get_line_chats() -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.cursor().execute("""
+            SELECT * FROM line_chats
+            ORDER BY COALESCE(last_message_at, created_at) DESC, id DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+def get_line_chat(source_id: str) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.cursor().execute("SELECT * FROM line_chats WHERE source_id = ?", (source_id,)).fetchone()
+        return dict(row) if row else None
+
+def add_line_message(chat_id: str, sender_type: str, sender_id: Optional[str],
+                     message_type: str, content: str, raw_data: Optional[str] = None,
+                     reply_token: Optional[str] = None, timestamp: Optional[str] = None) -> int:
+    ts = timestamp or datetime.now().isoformat()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        # Insert message
+        cursor.execute("""
+            INSERT INTO line_messages (chat_id, sender_type, sender_id, message_type, content, raw_data, reply_token, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (chat_id, sender_type, sender_id, message_type, content, raw_data, reply_token, ts))
+        msg_id = cursor.lastrowid
+
+        # Update last_message and last_message_at in line_chats
+        snippet = content if message_type == "text" else f"[{message_type}]"
+        cursor.execute("""
+            UPDATE line_chats
+            SET last_message = ?, last_message_at = ?
+            WHERE source_id = ?
+        """, (snippet, ts, chat_id))
+
+        conn.commit()
+        return msg_id
+
+def get_line_messages(chat_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.cursor().execute("""
+            SELECT * FROM (
+                SELECT * FROM line_messages
+                WHERE chat_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            ) ORDER BY id ASC
+        """, (chat_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+# LINE Webhook Log Helpers
+def add_webhook_log(event_types: str, source_id: Optional[str], payload: str, status: str = "success") -> int:
+    now = datetime.now().isoformat()
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO line_webhook_logs (event_types, source_id, payload, status, received_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (event_types, source_id, payload, status, now))
+        conn.commit()
+        return cursor.lastrowid
+
+def get_webhook_logs(page: int = 1, limit: int = 10) -> Dict[str, Any]:
+    offset = max(0, (page - 1) * limit)
+    with get_db() as conn:
+        cursor = conn.cursor()
+        total = cursor.execute("SELECT COUNT(*) FROM line_webhook_logs").fetchone()[0]
+        rows = cursor.execute("""
+            SELECT id, event_types, source_id, status, received_at,
+                   substr(payload, 1, 120) as preview
+            FROM line_webhook_logs
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset)).fetchall()
+        
+        total_pages = max(1, (total + limit - 1) // limit)
+        return {
+            "logs": [dict(r) for r in rows],
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages
+        }
+
+def get_webhook_log(log_id: int) -> Optional[Dict[str, Any]]:
+    with get_db() as conn:
+        row = conn.cursor().execute("SELECT * FROM line_webhook_logs WHERE id = ?", (log_id,)).fetchone()
+        return dict(row) if row else None

@@ -184,3 +184,102 @@ def send_line_image(image_url: str, preview_url: str = None) -> dict:
             return {"success": resp.status == 200}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+def get_bot_info() -> dict:
+    """
+    ตรวจสอบและดึงข้อมูล Bot Info จาก LINE Messaging API
+    https://developers.line.biz/en/reference/messaging-api/#get-bot-info
+    """
+    token = get_channel_access_token()
+    if not token:
+        return {"success": False, "message": "ไม่พบ Channel Access Token หรือ Channel ID/Secret ไม่ถูกต้อง"}
+
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        req = urllib.request.Request("https://api.line.me/v2/bot/info", headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                bot_data = json.loads(resp.read().decode("utf-8"))
+                return {"success": True, "bot": bot_data, "message": "เชื่อมต่อบอทสำเร็จ"}
+            return {"success": False, "message": f"LINE Status: {resp.status}"}
+    except urllib.error.HTTPError as he:
+        err_msg = he.read().decode("utf-8")
+        logger.error(f"Error get_bot_info: {he.code} {err_msg}")
+        return {"success": False, "message": f"LINE API Error {he.code}: {err_msg}"}
+    except Exception as e:
+        logger.error(f"Exception get_bot_info: {e}")
+        return {"success": False, "message": str(e)}
+
+def get_user_profile(user_id: str) -> dict:
+    """
+    ดึงข้อมูลโปรไฟล์ผู้ใช้จาก LINE Messaging API
+    https://developers.line.biz/en/reference/messaging-api/#get-profile
+    """
+    token = get_channel_access_token()
+    if not token or not user_id:
+        return {"success": False, "message": "Missing token or user_id"}
+
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        req = urllib.request.Request(f"https://api.line.me/v2/bot/profile/{user_id}", headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                profile = json.loads(resp.read().decode("utf-8"))
+                return {"success": True, "profile": profile}
+            return {"success": False, "message": f"Status: {resp.status}"}
+    except Exception as e:
+        logger.warning(f"Could not fetch profile for user {user_id}: {e}")
+        return {"success": False, "message": str(e)}
+
+def get_group_summary(group_id: str) -> dict:
+    """
+    ดึงข้อมูลสรุปกลุ่มจาก LINE Messaging API
+    https://developers.line.biz/en/reference/messaging-api/#get-group-summary
+    """
+    token = get_channel_access_token()
+    if not token or not group_id:
+        return {"success": False, "message": "Missing token or group_id"}
+
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        req = urllib.request.Request(f"https://api.line.me/v2/bot/group/{group_id}/summary", headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                summary = json.loads(resp.read().decode("utf-8"))
+                return {"success": True, "summary": summary}
+            return {"success": False, "message": f"Status: {resp.status}"}
+    except Exception as e:
+        logger.warning(f"Could not fetch summary for group {group_id}: {e}")
+        return {"success": False, "message": str(e)}
+
+def send_line_push_to(to_id: str, text: str) -> dict:
+    """
+    ส่งข้อความ Push Message ไปยัง User ID, Group ID หรือ Room ID ที่ระบุ
+    """
+    token = get_channel_access_token()
+    if not token:
+        return {"success": False, "message": "ยังไม่ได้ระบุ LINE Token หรือ Channel ID/Secret"}
+    if not to_id:
+        return {"success": False, "message": "ยังไม่ได้ระบุปลายทาง (to_id)"}
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}"
+    }
+    payload = {
+        "to": to_id,
+        "messages": [{"type": "text", "text": text}]
+    }
+
+    try:
+        req_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(LINE_PUSH_URL, data=req_data, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                return {"success": True, "message": "ส่งข้อความสำเร็จ"}
+            return {"success": False, "message": f"Status: {resp.status}"}
+    except urllib.error.HTTPError as he:
+        err_msg = he.read().decode("utf-8")
+        return {"success": False, "message": f"HTTP {he.code}: {err_msg}"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
