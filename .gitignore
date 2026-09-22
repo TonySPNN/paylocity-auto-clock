@@ -5,3 +5,5 @@ __pycache__/
 screenshots/*.png
 !screenshots/.gitkeep
 .env
+data.db
+*.db
