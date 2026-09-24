@@ -35,6 +35,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Paylocity Auto Clock", lifespan=lifespan)
 
+@app.middleware("http")
+async def capture_base_url_middleware(request: Request, call_next):
+    # Automatically capture public URL (e.g. from Render or reverse proxy) into app_base_url
+    try:
+        host = request.headers.get("host", "")
+        if host and not host.startswith("localhost") and not host.startswith("127.0.0.1"):
+            proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+            base_url = f"{proto}://{host}".rstrip("/")
+            current_base = database.get_setting("app_base_url", "")
+            if current_base != base_url:
+                database.update_settings({"app_base_url": base_url})
+    except Exception:
+        pass
+    return await call_next(request)
+
 BASE_DIR = os.path.dirname(__file__)
 SCREENSHOT_DIR = os.path.join(BASE_DIR, "screenshots")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -62,6 +77,7 @@ class ToggleIn(BaseModel):
 
 class PunchIn(BaseModel):
     action: str
+    target_time: Optional[str] = None
 
 class SendChatMsgIn(BaseModel):
     text: str
@@ -74,6 +90,28 @@ class GeminiTestIn(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def index_page(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/result/{history_id}", response_class=HTMLResponse)
+async def result_page(request: Request, history_id: int):
+    h = database.get_history_by_id(history_id)
+    if not h:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลผลการลงเวลา")
+    
+    formatted_time = ""
+    if h.get("executed_at"):
+        try:
+            exec_time = h["executed_at"]
+            if isinstance(exec_time, str):
+                exec_time = datetime.fromisoformat(exec_time.replace("Z", "+00:00"))
+            formatted_time = exec_time.strftime("%d/%m/%Y %H:%M:%S")
+        except Exception:
+            formatted_time = str(h.get("executed_at", ""))
+            
+    return templates.TemplateResponse("result.html", {
+        "request": request,
+        "history": h,
+        "formatted_time": formatted_time
+    })
 
 # API Routes: Schedules
 @app.get("/api/schedules")
@@ -140,17 +178,24 @@ async def api_save_settings(settings: Dict[str, str]):
 async def api_trigger_punch(punch: PunchIn, background_tasks: BackgroundTasks):
     action = punch.action
     action_th = "เข้างาน (Clock In)" if action == "clock_in" else "ออกงาน (Clock Out)"
-    history_id = database.add_history(action, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นระบบลงเวลา {action_th}...")
+    target_info = f" (เวลากดเป้าหมาย {punch.target_time})" if punch.target_time else ""
+    history_id = database.add_history(action, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นระบบลงเวลา {action_th}{target_info}...")
     
     # Run in background so HTTP response returns immediately
-    background_tasks.add_task(paylocity_bot.run_punch, action, history_id)
+    background_tasks.add_task(paylocity_bot.run_punch, action, history_id, punch.target_time)
     return {
         "success": True,
         "history_id": history_id,
         "action": action,
         "action_th": action_th,
+        "target_time": punch.target_time,
         "message": f"เริ่มกระบวนการลงเวลา {action_th} แล้ว"
     }
+
+@app.post("/api/punch/cancel")
+async def api_cancel_punch():
+    result = await paylocity_bot.cancel_punch()
+    return result
 
 @app.get("/api/punch/status/{history_id}")
 async def api_get_punch_status_by_id(history_id: int):

@@ -102,6 +102,53 @@ def reply_line_message(reply_token: str, text: str) -> dict:
         logger.error(f"Error replying LINE message: {e}")
         return {"success": False, "message": str(e)}
 
+def get_app_base_url() -> str:
+    """
+    ตรวจจับ URL ภายนอกของแอปสำหรับสร้างลิงก์คลิกดูผลลัพธ์
+    1. ตรวจจาก RENDER_EXTERNAL_URL (Render environment variable)
+    2. ตรวจจาก Settings 'app_base_url'
+    3. ตรวจจาก Settings 'webhook_url'
+    """
+    import os
+    render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+    if render_url:
+        return render_url
+
+    setting_url = get_setting("app_base_url", "").strip().rstrip("/")
+    if setting_url:
+        return setting_url
+
+    wh_url = get_setting("webhook_url", "").strip()
+    if wh_url and "://" in wh_url:
+        try:
+            parsed = urllib.parse.urlparse(wh_url)
+            return f"{parsed.scheme}://{parsed.netloc}"
+        except Exception:
+            pass
+
+    return "http://localhost:8000"
+
+def get_effective_line_user_id() -> str:
+    """
+    ดึง LINE User ID ที่ถูกต้องสำหรับส่ง Push Notification
+    หากยังไม่มี หรือเป็น dummy ID 'U999888777' จะค้นหาจากผู้ใช้ล่าสุดใน line_chats อัตโนมัติ
+    """
+    user_id = get_setting("line_user_id", "").strip()
+    if not user_id or user_id == "U999888777":
+        try:
+            from database import get_line_chats
+            chats = get_line_chats()
+            for c in chats:
+                sid = str(c.get("source_id", "")).strip()
+                if sid.startswith("U") and sid != "U999888777":
+                    user_id = sid
+                    update_settings({"line_user_id": user_id})
+                    logger.info(f"Auto-selected active LINE user ID from chats: {user_id}")
+                    break
+        except Exception as e:
+            logger.warning(f"Error resolving active LINE user: {e}")
+    return user_id
+
 def send_line_message(text: str) -> dict:
     """
     ส่งข้อความแจ้งเตือนผ่าน LINE Push Message API
@@ -110,7 +157,7 @@ def send_line_message(text: str) -> dict:
         return {"success": False, "message": "LINE notification disabled"}
 
     token = get_channel_access_token()
-    user_id = get_setting("line_user_id", "").strip()
+    user_id = get_effective_line_user_id()
 
     if not token:
         msg = "LINE Access Token ยังไม่มี (กรุณาใส่ Channel ID และ Channel Secret หรือใส่ Token ใน Settings)"
@@ -156,15 +203,32 @@ def send_line_message(text: str) -> dict:
 def send_line_image(image_url: str, preview_url: str = None) -> dict:
     """
     ส่งรูปภาพผลลัพธ์ผ่าน LINE Messaging API
+    รองรับทั้ง URL เต็ม (HTTPS) หรือ path สัมพัทธ์ เช่น /screenshots/...
     """
     if get_setting("line_enabled", "1") != "1":
         return {"success": False, "message": "LINE notification disabled"}
 
     token = get_channel_access_token()
-    user_id = get_setting("line_user_id", "").strip()
+    user_id = get_effective_line_user_id()
 
     if not token or not user_id:
         return {"success": False, "message": "Missing token or user_id"}
+
+    base_url = get_app_base_url()
+    # แปลง relative path เป็น public URL
+    full_image_url = image_url
+    if not image_url.startswith("http://") and not image_url.startswith("https://"):
+        cleaned_path = "/" + image_url.lstrip("/")
+        full_image_url = f"{base_url}{cleaned_path}"
+
+    # LINE บังคับว่า image URL ต้องเป็น HTTPS เท่านั้น
+    if not full_image_url.startswith("https://"):
+        logger.info(f"Skipping direct LINE image push because URL is not HTTPS ({full_image_url}). User can still view via web link.")
+        return {"success": False, "message": "LINE requires HTTPS image URL"}
+
+    full_preview_url = preview_url or full_image_url
+    if not full_preview_url.startswith("https://"):
+        full_preview_url = full_image_url
 
     headers = {
         "Content-Type": "application/json",
@@ -176,8 +240,8 @@ def send_line_image(image_url: str, preview_url: str = None) -> dict:
         "messages": [
             {
                 "type": "image",
-                "originalContentUrl": image_url,
-                "previewImageUrl": preview_url or image_url
+                "originalContentUrl": full_image_url,
+                "previewImageUrl": full_preview_url
             }
         ]
     }
@@ -188,7 +252,61 @@ def send_line_image(image_url: str, preview_url: str = None) -> dict:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return {"success": resp.status == 200}
     except Exception as e:
+        logger.warning(f"Failed to push image to LINE: {e}")
         return {"success": False, "message": str(e)}
+
+def send_punch_notification(action: str, status: str, message: str,
+                            history_id: Optional[int] = None,
+                            screenshot_filename: Optional[str] = None,
+                            target_time: Optional[str] = None) -> dict:
+    """
+    ส่งข้อความรายงานสถานะการลงเวลาเข้า LINE อย่างเป็นระบบ:
+    - แจ้งเตือนเมื่อบอทเริ่มงาน
+    - แจ้งเตือนเมื่อลงเวลาสำเร็จ/ล้มเหลว พร้อมส่งลิงก์ดูหน้าจอสรุปผลและภาพแคป
+    """
+    action_th = "เข้างาน (Clock In)" if action == "clock_in" else "ออกงาน (Clock Out)"
+    base_url = get_app_base_url()
+    now_str = datetime.now().strftime("%H:%M:%S (%d/%m/%Y)") if "datetime" in globals() else ""
+    if not now_str:
+        from datetime import datetime as dt
+        now_str = dt.now().strftime("%H:%M:%S (%d/%m/%Y)")
+
+    if status == "started":
+        target_line = f"\n🎯 เวลากดเป้าหมาย: {target_time}" if target_time else ""
+        text = (
+            f"🚀 [Paylocity] เริ่มกระบวนการลงเวลา {action_th} แล้ว!{target_line}\n"
+            f"บอทกำลังเปิดหน้าเว็บ SSO และเตรียม Standby พร้อมกดในเวลาที่กำหนดครับ..."
+        )
+        return send_line_message(text)
+
+    # Result URL สำหรับคลิกดูหน้าจอสรุปและรูปภาพ
+    result_url = f"{base_url}/result/{history_id}" if history_id else f"{base_url}/#history"
+
+    if status in ["success", "warning"]:
+        text = (
+            f"🎉 [Paylocity] ลงเวลา {action_th} สำเร็จ!\n"
+            f"⏱️ เวลาที่กด: {now_str}\n"
+            f"📌 ผลลัพธ์: {message}\n\n"
+            f"📱 คลิกดูหน้าจอสรุปผลและภาพแคปได้ที่:\n"
+            f"{result_url}"
+        )
+        res = send_line_message(text)
+        if screenshot_filename:
+            send_line_image(f"/screenshots/{screenshot_filename}")
+        return res
+    else:
+        text = (
+            f"❌ [Paylocity] ลงเวลา {action_th} ไม่สำเร็จ\n"
+            f"⏱️ เวลา: {now_str}\n"
+            f"⚠️ รายละเอียด: {message}\n\n"
+            f"📱 ตรวจสอบหน้าจอและรายละเอียดข้อผิดพลาดได้ที่:\n"
+            f"{result_url}"
+        )
+        res = send_line_message(text)
+        if screenshot_filename:
+            send_line_image(f"/screenshots/{screenshot_filename}")
+        return res
+
 
 def get_bot_info() -> dict:
     """

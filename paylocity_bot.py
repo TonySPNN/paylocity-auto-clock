@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 
 from database import get_setting, add_history, update_history
 from voice_caller import make_voice_call
-from line_service import send_line_message, send_line_image
+from line_service import send_line_message, send_line_image, send_punch_notification
 
 # Configure logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -17,8 +17,103 @@ logger = logging.getLogger("paylocity_bot")
 SCREENSHOT_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
+# Global cancellation tracking
+_cancel_event = asyncio.Event()
+_active_browser = None
+_active_task = None
+
+def is_cancel_requested() -> bool:
+    return _cancel_event.is_set()
+
+async def cancel_punch() -> Dict[str, Any]:
+    global _cancel_event, _active_browser, _active_task
+    _cancel_event.set()
+    logger.info("cancel_punch() requested by user.")
+    
+    from database import get_running_history, update_history
+    running_h = get_running_history()
+    if running_h:
+        update_history(running_h["id"], "cancelled", "⏹️ การทำงานถูกยกเลิกโดยผู้ใช้งาน (Cancelled by user)")
+        
+    if _active_browser:
+        try:
+            await _active_browser.close()
+        except Exception as e:
+            logger.warning(f"Error closing browser on cancel: {e}")
+            
+    if _active_task and not _active_task.done():
+        try:
+            _active_task.cancel()
+        except Exception:
+            pass
+            
+    return {"success": True, "message": "ยกเลิกการทำงานเรียบร้อยแล้ว"}
+
+async def wait_until_target_time(target_time: Optional[str], history_id: int, page) -> str:
+    """
+    หากมีการระบุ target_time (เช่น '06:00') บอทจะ Standby รอจนถึงเวลาเป้าหมายจึงค่อยกด
+    ระหว่างรอ จะอัปเดตหน้าจอสด และตรวจสอบคำสั่งกดยกเลิก
+    คืนค่า Timing Report เช่น 'ตรงเวลาเป้าหมาย 06:00 (กดเมื่อ 06:00:03)'
+    """
+    if not target_time:
+        clicked_str = datetime.now().strftime("%H:%M:%S")
+        return f"กดเมื่อ {clicked_str}"
+
+    import pytz
+    tz_str = get_setting("timezone", "Asia/Bangkok")
+    try:
+        tz = pytz.timezone(tz_str)
+    except Exception:
+        tz = pytz.timezone("Asia/Bangkok")
+
+    now_tz = datetime.now(tz)
+    try:
+        t_hour, t_minute = map(int, target_time.strip().split(":"))
+    except Exception:
+        clicked_str = datetime.now(tz).strftime("%H:%M:%S")
+        return f"กดเมื่อ {clicked_str}"
+
+    target_dt = now_tz.replace(hour=t_hour, minute=t_minute, second=0, microsecond=0)
+    
+    # ถ้าเริ่มก่อนเวลา (เช่น ล่วงหน้า 4-5 นาที) ให้ Standby รอจนถึงเป้าหมาย
+    wait_sec = (target_dt - now_tz).total_seconds()
+    if wait_sec > 0:
+        logger.info(f"Button ready! Standby for target time {target_time} (waiting {wait_sec:.1f}s)...")
+        await record_step(
+            history_id, page,
+            f"[สเต็ป 6/7] ⏳ เข้าสู่ระบบสำเร็จและพบปุ่มแล้ว! กำลัง Standby รอเวลากดเป้าหมาย {target_time} (เหลืออีก {int(wait_sec)} วินาที)...",
+            take_screenshot=True
+        )
+        
+        last_reported_rem = int(wait_sec)
+        while datetime.now(tz) < target_dt:
+            if is_cancel_requested():
+                raise asyncio.CancelledError("User cancelled while waiting for target time")
+            
+            curr_rem = int((target_dt - datetime.now(tz)).total_seconds())
+            if curr_rem > 0 and (last_reported_rem - curr_rem >= 15 or curr_rem <= 10):
+                last_reported_rem = curr_rem
+                await record_step(
+                    history_id, page,
+                    f"[สเต็ป 6/7] ⏳ Standby รอเวลากด {target_time} (เหลืออีก {curr_rem} วินาที)...",
+                    take_screenshot=False
+                )
+            await asyncio.sleep(0.5)
+
+    clicked_dt = datetime.now(tz)
+    clicked_str = clicked_dt.strftime("%H:%M:%S")
+    
+    if clicked_dt.hour == t_hour and clicked_dt.minute == t_minute:
+        return f"ตรงเวลาเป้าหมาย {target_time} (กดเมื่อ {clicked_str})"
+    elif clicked_dt > target_dt:
+        delay = int((clicked_dt - target_dt).total_seconds())
+        return f"กดเมื่อ {clicked_str} (เลยเวลาเป้าหมาย {target_time} ไป {delay} วินาที)"
+    else:
+        return f"กดเมื่อ {clicked_str} (เป้าหมาย {target_time})"
+
 
 def get_browser_context_config(profile: str = "macos_sequoia") -> Dict[str, Any]:
+
     """
     สร้าง User-Agent และ Client Hints ให้สอดคล้องกับ Duo Security OS & Browser Compliance Policy
     ป้องกันการแจ้งเตือน 'macOS update required' หรือ 'Chrome update required'
@@ -241,27 +336,32 @@ async def record_step(history_id: Optional[int], page, message: str, take_screen
     update_history(history_id, "running", message, screenshot_path=live_shot_path)
 
 
-async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) -> Dict[str, Any]:
+async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, target_time: Optional[str] = None) -> Dict[str, Any]:
     """
     รันบอท Playwright เพื่อทำการ Clock In หรือ Clock Out
     พร้อมระบบโทรแจ้งเตือน Duo และส่งผลเข้า LINE
     """
+    global _cancel_event, _active_browser, _active_task
+    _cancel_event.clear()
+    _active_task = asyncio.current_task()
+
     action_th = "เข้างาน (Clock In)" if action == "clock_in" else "ออกงาน (Clock Out)"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     screenshot_filename = f"{action}_{timestamp}.png"
     screenshot_path = os.path.join(SCREENSHOT_DIR, screenshot_filename)
 
+    target_info = f" (เวลากดเป้าหมาย {target_time})" if target_time else ""
     if not history_id:
-        history_id = add_history(action, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นกระบวนการลงเวลา {action_th}...")
+        history_id = add_history(action, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นกระบวนการลงเวลา {action_th}{target_info}...")
     else:
-        update_history(history_id, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นกระบวนการลงเวลา {action_th}...")
+        update_history(history_id, "running", f"[สเต็ป 1/7] กำลังเริ่มต้นกระบวนการลงเวลา {action_th}{target_info}...")
 
-    logger.info(f"Starting punch workflow for {action} (History ID: {history_id})")
+    logger.info(f"Starting punch workflow for {action}{target_info} (History ID: {history_id})")
 
     # แจ้งเตือนสเต็ปที่ 1 เข้า LINE ทันทีที่เริ่มงาน
-    send_line_message(f"🚀 [Paylocity] เริ่มกระบวนการลงเวลา {action_th} แล้ว!\nระบบกำลังเปิดหน้าเว็บและเข้าสู่ระบบ SSO ให้ครับ...")
+    send_punch_notification(action=action, status="started", message="เริ่มงาน", history_id=history_id, target_time=target_time)
 
-    # อ่านค่าการตั้งค่าจาก SQLite
+    # อ่านค่าการตั้งค่าจาก Database
     paylocity_url = get_setting("paylocity_url", "https://access.paylocity.com/").strip()
     if "escher" in paylocity_url.lower() or "redirect_uri" in paylocity_url.lower():
         paylocity_url = "https://access.paylocity.com/"
@@ -274,8 +374,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
         err_msg = "ยังไม่ได้ระบุ Email หรือ Password ในเมนู Settings"
         logger.error(err_msg)
         update_history(history_id, "failed", err_msg)
-        send_line_message(f"❌ [Paylocity] ลงเวลา {action_th} ไม่สำเร็จ: {err_msg}")
+        send_punch_notification(action=action, status="failed", message=err_msg, history_id=history_id, target_time=target_time)
         return {"success": False, "message": err_msg}
+
 
     # นำเข้า Playwright
     try:
@@ -297,7 +398,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                 "--disable-blink-features=AutomationControlled"
             ]
         )
+        _active_browser = browser
         browser_config = get_browser_context_config(browser_profile)
+
         context = await browser.new_context(
             viewport={"width": 1440, "height": 900},
             user_agent=browser_config["user_agent"],
@@ -557,16 +660,21 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             button_found = False
             already_punched = False
             clicked_btn_text = ""
+            timing_info = ""
 
             # วนลูปตรวจสอบสูงสุด 20 วินาทีเพื่อให้เวลาหน้าเว็บโหลดและเรนเดอร์ข้อมูลการ์ด Time
             search_start = time.time()
             while time.time() - search_start < 20:
+                if is_cancel_requested():
+                    raise asyncio.CancelledError("User cancelled execution")
+
                 # 1. ค้นหาด้วย Playwright get_by_role('button') (แม่นยำที่สุด)
                 target_btn = page.get_by_role("button", name=target_re)
                 if await target_btn.count() > 0 and await target_btn.first.is_visible():
-                    logger.info(f"Found target button '{target_text}' via get_by_role, clicking...")
-                    await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} ในการ์ด Time แล้ว กำลังคลิก...", take_screenshot=True)
+                    logger.info(f"Found target button '{target_text}' via get_by_role. Preparing standby or click...")
                     await target_btn.first.scroll_into_view_if_needed()
+                    timing_info = await wait_until_target_time(target_time, history_id, page)
+                    await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} แล้ว กำลังคลิก ({timing_info})...", take_screenshot=True)
                     await asyncio.sleep(0.5)
                     await target_btn.first.click()
                     button_found = True
@@ -581,8 +689,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                         if await sibling_btn.count() > 0 and await sibling_btn.first.is_visible():
                             sib_text = (await sibling_btn.first.inner_text()).strip()
                             if target_re.match(sib_text):
-                                logger.info(f"Found target button '{sib_text}' next to 'More', clicking...")
-                                await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {sib_text} ข้างปุ่ม More กำลังคลิก...", take_screenshot=True)
+                                logger.info(f"Found target button '{sib_text}' next to 'More'. Preparing standby or click...")
+                                timing_info = await wait_until_target_time(target_time, history_id, page)
+                                await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {sib_text} ข้างปุ่ม More กำลังคลิก ({timing_info})...", take_screenshot=True)
                                 await sibling_btn.first.click()
                                 button_found = True
                                 clicked_btn_text = sib_text
@@ -604,8 +713,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                     if await time_cards.count() > 0:
                         tc_btn = time_cards.last.get_by_role("button", name=target_re)
                         if await tc_btn.count() > 0 and await tc_btn.first.is_visible():
-                            logger.info(f"Found button inside Time card, clicking...")
-                            await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} ในกล่อง Time กำลังคลิก...", take_screenshot=True)
+                            logger.info(f"Found button inside Time card. Preparing standby or click...")
+                            timing_info = await wait_until_target_time(target_time, history_id, page)
+                            await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} ในกล่อง Time กำลังคลิก ({timing_info})...", take_screenshot=True)
                             await tc_btn.first.click()
                             button_found = True
                             clicked_btn_text = target_text
@@ -631,8 +741,9 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                     try:
                         f_btn = frame.get_by_role("button", name=target_re)
                         if await f_btn.count() > 0 and await f_btn.first.is_visible():
-                            logger.info(f"Found target button in iframe, clicking...")
-                            await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} ในเฟรม กำลังคลิก...", take_screenshot=True)
+                            logger.info(f"Found target button in iframe. Preparing standby or click...")
+                            timing_info = await wait_until_target_time(target_time, history_id, page)
+                            await record_step(history_id, page, f"[สเต็ป 7/7] พบปุ่ม {target_text} ในเฟรม กำลังคลิก ({timing_info})...", take_screenshot=True)
                             await f_btn.first.click()
                             button_found = True
                             clicked_btn_text = target_text
@@ -641,6 +752,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
                         pass
                 if button_found:
                     break
+
 
                 await asyncio.sleep(1.5)
 
@@ -733,11 +845,12 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             logger.info(f"Final screenshot saved to {screenshot_path}")
 
             now_str = datetime.now().strftime("%H:%M:%S (%d/%m/%Y)")
+            timing_str = f" ({timing_info})" if timing_info else ""
             if button_found:
                 if verified_toggle:
-                    success_msg = f"🎉 ลงเวลา {action_th} สำเร็จ 100%! (ปุ่มสลับเป็น {opp_text} เรียบร้อย) เมื่อ {now_str}"
+                    success_msg = f"🎉 ลงเวลา {action_th} สำเร็จ 100%!{timing_str} (ปุ่มสลับเป็น {opp_text} เรียบร้อย) เมื่อ {now_str}"
                 else:
-                    success_msg = f"🎉 กดปุ่ม {action_th} เรียบร้อยเมื่อ {now_str}"
+                    success_msg = f"🎉 กดปุ่ม {action_th} เรียบร้อย{timing_str} เมื่อ {now_str}"
                 status = "success"
             elif already_punched:
                 opp_status_th = "เข้างาน (Clocked in)" if action == "clock_in" else "ออกงาน (Clocked out)"
@@ -749,16 +862,36 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
 
             update_history(history_id, status, success_msg, f"/screenshots/{screenshot_filename}")
             
-            # ส่งแจ้งเตือนสรุปผลเข้า LINE
-            send_line_message(
-                f"✅ รายงานผล Paylocity\n"
-                f"📌 {success_msg}\n"
-                f"⏰ เวลา: {now_str}"
+            # ส่งแจ้งเตือนสรุปผลและลิงก์ดูหน้าจอผลลัพธ์เข้า LINE
+            send_punch_notification(
+                action=action,
+                status=status,
+                message=success_msg,
+                history_id=history_id,
+                screenshot_filename=screenshot_filename,
+                target_time=target_time
             )
-            send_line_image(screenshot_path)
 
             await browser.close()
             return {"success": (status == "success"), "message": success_msg, "screenshot": f"/screenshots/{screenshot_filename}"}
+
+        except asyncio.CancelledError:
+            logger.info(f"Execution for {action} was cancelled by user.")
+            err_msg = "⏹️ การทำงานถูกยกเลิกโดยผู้ใช้งาน (Cancelled by user)"
+            update_history(history_id, "cancelled", err_msg, f"/screenshots/{screenshot_filename}")
+            send_punch_notification(
+                action=action,
+                status="cancelled",
+                message=err_msg,
+                history_id=history_id,
+                screenshot_filename=screenshot_filename,
+                target_time=target_time
+            )
+            try:
+                await browser.close()
+            except Exception:
+                pass
+            return {"success": False, "message": err_msg}
 
         except Exception as e:
             logger.exception(f"Error during bot execution: {e}")
@@ -769,14 +902,28 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None) 
             
             err_msg = f"[ล้มเหลว] ❌ เกิดข้อผิดพลาดระหว่างรันบอท: {str(e)}"
             update_history(history_id, "failed", err_msg, f"/screenshots/{screenshot_filename}")
-            send_line_message(f"❌ ลงเวลา {action_th} ล้มเหลว:\n{err_msg}")
-            send_line_image(screenshot_path)
-            await browser.close()
+            send_punch_notification(
+                action=action,
+                status="failed",
+                message=err_msg,
+                history_id=history_id,
+                screenshot_filename=screenshot_filename,
+                target_time=target_time
+            )
+            try:
+                await browser.close()
+            except Exception:
+                pass
             return {"success": False, "message": err_msg}
 
-def sync_run_punch(action: str = "clock_in") -> Dict[str, Any]:
+        finally:
+            _active_browser = None
+            _active_task = None
+
+def sync_run_punch(action: str = "clock_in", target_time: Optional[str] = None) -> Dict[str, Any]:
     """Sync wrapper for calling from APScheduler"""
-    return asyncio.run(run_punch(action))
+    return asyncio.run(run_punch(action=action, target_time=target_time))
+
 
 if __name__ == "__main__":
     import sys
