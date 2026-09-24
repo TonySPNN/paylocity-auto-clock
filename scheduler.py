@@ -31,12 +31,15 @@ def reload_schedules():
     except Exception:
         tz = pytz.timezone("Asia/Bangkok")
 
-    lead_minutes = 4
+    # Configurable Lead Time (1 to 15 minutes, default 5)
+    lead_minutes = 5
     try:
-        lead_val = int(get_setting("pre_login_lead_minutes", "4"))
-        lead_minutes = max(1, min(lead_val, 15))
+        lead_val_str = get_setting("lead_minutes", get_setting("pre_login_lead_minutes", "5")).strip()
+        lead_val = int(lead_val_str)
+        lead_minutes = max(1, min(15, lead_val))
     except Exception:
-        lead_minutes = 4
+        lead_minutes = 5
+    logger.info(f"Scheduling jobs with lead time: {lead_minutes} minutes in advance.")
 
     count = 0
     for sch in schedules:

@@ -190,7 +190,8 @@ def init_db():
             "proxy_enabled": "0",
             "proxy_server": "",
             "proxy_username": "",
-            "proxy_password": ""
+            "proxy_password": "",
+            "lead_minutes": "5"
         }
         
         for k, v in default_settings.items():

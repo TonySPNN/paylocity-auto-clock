@@ -3,7 +3,7 @@ import re
 import time
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 from database import get_setting, add_history, update_history
@@ -74,14 +74,21 @@ async def wait_until_target_time(target_time: Optional[str], history_id: int, pa
         return f"กดเมื่อ {clicked_str}"
 
     target_dt = now_tz.replace(hour=t_hour, minute=t_minute, second=0, microsecond=0)
-    
-    # ถ้าเริ่มก่อนเวลา (เช่น ล่วงหน้า 4-5 นาที) ให้ Standby รอจนถึงเป้าหมาย
-    wait_sec = (target_dt - now_tz).total_seconds()
+    diff = (target_dt - now_tz).total_seconds()
+    # ตรวจสอบกรณีข้ามวัน (Midnight wrap-around) เช่น ทริกเกอร์ 23:55 สำหรับเป้าหมาย 00:05
+    if diff < -43200:
+        target_dt += timedelta(days=1)
+        diff = (target_dt - now_tz).total_seconds()
+    elif diff > 43200:
+        target_dt -= timedelta(days=1)
+        diff = (target_dt - now_tz).total_seconds()
+
+    wait_sec = diff
     if wait_sec > 0:
         logger.info(f"Button ready! Standby for target time {target_time} (waiting {wait_sec:.1f}s)...")
         await record_step(
             history_id, page,
-            f"[สเต็ป 6/7] ⏳ เข้าสู่ระบบสำเร็จและพบปุ่มแล้ว! กำลัง Standby รอเวลากดเป้าหมาย {target_time} (เหลืออีก {int(wait_sec)} วินาที)...",
+            f"[สเต็ป 7/7] ⏳ เข้าสู่ระบบสำเร็จและพบปุ่มแล้ว! กำลัง Standby รอเวลากดเป้าหมาย {target_time} (เหลืออีก {int(wait_sec)} วินาที)...",
             take_screenshot=True
         )
         
@@ -95,10 +102,18 @@ async def wait_until_target_time(target_time: Optional[str], history_id: int, pa
                 last_reported_rem = curr_rem
                 await record_step(
                     history_id, page,
-                    f"[สเต็ป 6/7] ⏳ Standby รอเวลากด {target_time} (เหลืออีก {curr_rem} วินาที)...",
+                    f"[สเต็ป 7/7] ⏳ Standby รอเวลากด {target_time} (เหลืออีก {curr_rem} วินาที)...",
                     take_screenshot=False
                 )
             await asyncio.sleep(0.5)
+    else:
+        delay = int(abs(wait_sec))
+        logger.info(f"Arrived at dashboard past target time {target_time} (by {delay}s). Proceeding to click immediately!")
+        await record_step(
+            history_id, page,
+            f"[สเต็ป 7/7] ⚡ เข้าถึงหน้าเว็บเวลา {now_tz.strftime('%H:%M:%S')} (เลยเวลาเป้าหมาย {target_time} มา {delay} วินาที) -> ดำเนินการกดลงเวลาต่อทันทีจนสำเร็จ...",
+            take_screenshot=True
+        )
 
     clicked_dt = datetime.now(tz)
     clicked_str = clicked_dt.strftime("%H:%M:%S")
@@ -706,11 +721,26 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
             clicked_btn_text = ""
             timing_info = ""
 
-            # วนลูปตรวจสอบสูงสุด 20 วินาทีเพื่อให้เวลาหน้าเว็บโหลดและเรนเดอร์ข้อมูลการ์ด Time
+            # วนลูปค้นหาและกดปุ่มอย่างต่อเนื่องสูงสุด 90 วินาที (เพื่อให้แน่ใจว่าลงเวลาสำเร็จแม้หน้าเว็บโหลดช้าหรือเกินเวลาเป้าหมาย)
             search_start = time.time()
-            while time.time() - search_start < 20:
+            last_scroll_time = 0
+            has_reloaded = False
+            attempt = 0
+
+            while time.time() - search_start < 90:
                 if is_cancel_requested():
                     raise asyncio.CancelledError("User cancelled execution")
+
+                attempt += 1
+                elapsed_search = int(time.time() - search_start)
+
+                # อัปเดตสถานะให้ผู้ใช้ทราบว่าบอทกำลังพยายามหาปุ่มและทำงานต่อ
+                if elapsed_search > 5 and attempt % 3 == 0:
+                    await record_step(
+                        history_id, page,
+                        f"[สเต็ป 7/7] 🔍 กำลังค้นหาปุ่ม {action_th} บนหน้าเว็บอย่างต่อเนื่อง (ค้นหามาแล้ว {elapsed_search} วินาที)...",
+                        take_screenshot=(attempt % 6 == 0)
+                    )
 
                 # 1. ค้นหาด้วย Playwright get_by_role('button') (แม่นยำที่สุด)
                 target_btn = page.get_by_role("button", name=target_re)
@@ -797,12 +827,7 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
                 if button_found:
                     break
 
-
-                await asyncio.sleep(1.5)
-
-            # 6. Fallback: JavaScript DOM Traverser (เจาะจงเฉพาะ button และ [role='button'] เท่านั้น ไม่คลิกลิงก์ Timesheet)
-            if not button_found and not already_punched:
-                logger.info("Trying JavaScript DOM traverser fallback...")
+                # 6. Fallback ในลูป: JavaScript DOM Traverser (เจาะจงเฉพาะ button และ [role='button'])
                 try:
                     js_script = """
                         (targetAction) => {
@@ -843,13 +868,46 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
                     if js_res and js_res.get("clicked"):
                         button_found = True
                         clicked_btn_text = js_res.get("text", target_text)
+                        timing_info = await wait_until_target_time(target_time, history_id, page)
                         logger.info(f"JS fallback clicked '{clicked_btn_text}' successfully!")
+                        break
                     elif js_res and js_res.get("already"):
                         already_punched = True
                         clicked_btn_text = js_res.get("text", opp_text)
                         logger.info(f"JS fallback detected already punched ('{clicked_btn_text}')!")
+                        break
                 except Exception as e:
                     logger.debug(f"JS fallback error: {e}")
+
+                # กลยุทธ์ช่วยกระตุ้นการเรนเดอร์: เลื่อนจอขึ้น-ลงทุก 8 วินาที
+                if time.time() - last_scroll_time > 8:
+                    last_scroll_time = time.time()
+                    try:
+                        await page.evaluate("window.scrollTo(0, 450)")
+                        await asyncio.sleep(0.5)
+                        await page.evaluate("window.scrollTo(0, 250)")
+                    except Exception:
+                        pass
+
+                # หากผ่านไป 30 วินาทีแล้ว URL หลุดจากหน้า go.paylocity.com ให้พาเลี้ยวกลับมาทันที
+                curr_url = page.url.lower()
+                if elapsed_search > 30 and "go.paylocity.com" not in curr_url:
+                    logger.info(f"Current page is at {page.url}, redirecting back to https://go.paylocity.com/ ...")
+                    await page.goto("https://go.paylocity.com/", wait_until="domcontentloaded", timeout=25000)
+                    await asyncio.sleep(3)
+                elif elapsed_search > 45 and not has_reloaded:
+                    # หากผ่านไป 45 วินาทีแล้วยังไม่พบวิดเจ็ต ให้รีเฟรชหน้าเว็บ 1 ครั้งเพื่อโหลดวิดเจ็ตใหม่
+                    has_reloaded = True
+                    logger.info("Widgets not found after 45s, reloading page to trigger re-render...")
+                    await record_step(history_id, page, "[สเต็ป 7/7] กำลังรีเฟรชหน้าเว็บเพื่อกระตุ้นให้วิดเจ็ตลงเวลาแสดงผล...", take_screenshot=True)
+                    try:
+                        await page.reload(wait_until="domcontentloaded", timeout=30000)
+                        await asyncio.sleep(4)
+                        await page.evaluate("window.scrollTo(0, 320)")
+                    except Exception as e:
+                        logger.warning(f"Page reload note: {e}")
+
+                await asyncio.sleep(1.5)
 
             # ตรวจสอบหน้าต่างยืนยัน (Confirmation modal/dialog ถ้ามี)
             if button_found:
