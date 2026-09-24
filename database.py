@@ -1,17 +1,78 @@
 import sqlite3
 import os
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
+from supabase_db import (
+    get_supabase_connection,
+    AsyncpgConnectionWrapper,
+    AsyncpgCursorWrapper,
+    convert_sqlite_to_postgres,
+    Row,
+    DATABASE_URL,
+    DIRECT_URL
+)
+
+logger = logging.getLogger("database")
 DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
+USE_SUPABASE = os.getenv("USE_SUPABASE", "1") == "1"
 
 def get_db():
+    if USE_SUPABASE:
+        try:
+            return get_supabase_connection()
+        except Exception as e:
+            logger.error(f"Failed to connect to Supabase, falling back to SQLite: {e}")
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
+def _migrate_from_sqlite(cursor):
+    if not os.path.exists(DB_PATH):
+        return
+    try:
+        sq_conn = sqlite3.connect(DB_PATH)
+        sq_conn.row_factory = sqlite3.Row
+        sq_cur = sq_conn.cursor()
+
+        # Migrate settings
+        sq_cur.execute("SELECT key, value FROM settings")
+        for r in sq_cur.fetchall():
+            cursor.execute("""
+                INSERT INTO settings (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """, (r["key"], r["value"]))
+
+        # Migrate schedules if empty
+        row = cursor.execute("SELECT COUNT(*) FROM schedules").fetchone()
+        sched_count = row[0] if row else 0
+        if sched_count == 0:
+            sq_cur.execute("SELECT title, action, schedule_type, target_date, days_of_week, target_time, is_enabled, created_at FROM schedules")
+            for r in sq_cur.fetchall():
+                cursor.execute("""
+                    INSERT INTO schedules (title, action, schedule_type, target_date, days_of_week, target_time, is_enabled, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (r["title"], r["action"], r["schedule_type"], r["target_date"], r["days_of_week"], r["target_time"], r["is_enabled"], r["created_at"]))
+
+        # Migrate history if empty
+        row = cursor.execute("SELECT COUNT(*) FROM history").fetchone()
+        hist_count = row[0] if row else 0
+        if hist_count == 0:
+            sq_cur.execute("SELECT action, status, message, screenshot_path, executed_at FROM history")
+            for r in sq_cur.fetchall():
+                cursor.execute("""
+                    INSERT INTO history (action, status, message, screenshot_path, executed_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (r["action"], r["status"], r["message"], r["screenshot_path"], r["executed_at"]))
+
+        sq_conn.close()
+    except Exception as e:
+        logger.warning(f"Error migrating SQLite data: {e}")
+
 def init_db():
     with get_db() as conn:
+
         cursor = conn.cursor()
         
         # 1. Schedules Table
@@ -70,11 +131,11 @@ def init_db():
         # Migration: ensure latest_reply_token exists in existing databases
         try:
             cursor.execute("ALTER TABLE line_chats ADD COLUMN latest_reply_token TEXT")
-        except sqlite3.OperationalError:
+        except (sqlite3.OperationalError, Exception):
             pass
         try:
             cursor.execute("ALTER TABLE line_chats ADD COLUMN latest_reply_time TEXT")
-        except sqlite3.OperationalError:
+        except (sqlite3.OperationalError, Exception):
             pass
 
         # 5. LINE Messages History Table
@@ -138,7 +199,12 @@ def init_db():
             WHERE key = 'paylocity_url' AND (value LIKE '%Escher%' OR value LIKE '%redirect_uri%')
         """)
 
+        # Migrate existing SQLite data if Supabase tables are empty
+        if USE_SUPABASE:
+            _migrate_from_sqlite(cursor)
+
         conn.commit()
+
 
 # Settings Helpers
 def get_setting(key: str, default: str = "") -> str:

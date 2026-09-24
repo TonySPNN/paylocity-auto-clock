@@ -9,3 +9,4 @@ requests==2.32.3
 python-dotenv==1.0.1
 icalendar==5.0.12
 pytz==2024.1
+asyncpg>=0.29.0
