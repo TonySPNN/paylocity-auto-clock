@@ -86,6 +86,11 @@ class GeminiTestIn(BaseModel):
     api_keys: str
     model: Optional[str] = None
 
+class ProxyTestIn(BaseModel):
+    proxy_server: str
+    proxy_username: Optional[str] = None
+    proxy_password: Optional[str] = None
+
 # Web Routes
 @app.get("/", response_class=HTMLResponse)
 async def index_page(request: Request):
@@ -220,6 +225,70 @@ async def api_test_call():
 async def api_test_line():
     result = line_service.send_line_message("🔔 ทดสอบการแจ้งเตือนจาก Paylocity Auto Clock! ระบบเชื่อมต่อ LINE สำเร็จเรียบร้อยครับ 🎉")
     return result
+
+# API Routes: Test Thai Proxy Connection & GeoIP
+@app.post("/api/proxy/test")
+async def api_test_proxy(body: ProxyTestIn):
+    proxy_server = body.proxy_server.strip()
+    if not proxy_server:
+        return {"success": False, "message": "กรุณาระบุ Proxy Server เช่น http://103.xx.xx.xx:8080 หรือ socks5://host:port"}
+    
+    import urllib.parse
+    import time
+    import requests
+    
+    if "://" not in proxy_server:
+        proxy_server = f"http://{proxy_server}"
+        
+    parsed = urllib.parse.urlparse(proxy_server)
+    scheme = parsed.scheme.lower()
+    netloc = parsed.netloc
+    
+    auth = ""
+    if body.proxy_username and body.proxy_password:
+        auth = f"{urllib.parse.quote(body.proxy_username)}:{urllib.parse.quote(body.proxy_password)}@"
+    
+    if auth and "@" not in netloc:
+        netloc = f"{auth}{netloc}"
+        
+    full_proxy_url = f"{scheme}://{netloc}"
+    proxies = {
+        "http": full_proxy_url,
+        "https": full_proxy_url
+    }
+    
+    t0 = time.time()
+    try:
+        # Check IP & Geolocation using ip-api.com
+        resp = requests.get(
+            "http://ip-api.com/json/?fields=status,message,country,countryCode,regionName,city,isp,query",
+            proxies=proxies,
+            timeout=15
+        )
+        latency_ms = int((time.time() - t0) * 1000)
+        data = resp.json()
+        if data.get("status") == "success":
+            return {
+                "success": True,
+                "ip": data.get("query"),
+                "country": data.get("country"),
+                "country_code": data.get("countryCode"),
+                "city": data.get("city"),
+                "region": data.get("regionName"),
+                "isp": data.get("isp"),
+                "latency_ms": latency_ms,
+                "message": f"เชื่อมต่อ Proxy สำเร็จ! IP: {data.get('query')} ({data.get('city')}, {data.get('country')} - {data.get('isp')})"
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Proxy ตอบสนองแต่ไม่สามารถดึงตำแหน่งได้: {data.get('message', 'Unknown')}"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"ไม่สามารถเชื่อมต่อผ่าน Proxy ได้: {str(e)}"
+        }
 
 # Helper: Background Task to Sync LINE Chat Profile (User, Group, Room)
 def sync_chat_profile(source_type: str, source_id: str, sender_id: Optional[str] = None):

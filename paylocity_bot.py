@@ -401,13 +401,35 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
         _active_browser = browser
         browser_config = get_browser_context_config(browser_profile)
 
-        context = await browser.new_context(
-            viewport={"width": 1440, "height": 900},
-            user_agent=browser_config["user_agent"],
-            extra_http_headers=browser_config["extra_http_headers"],
-            locale="en-US",
-            timezone_id="Asia/Bangkok"
-        )
+        # Configure Proxy if enabled (to route requests via Thai IP for Duo/Paylocity)
+        proxy_config = None
+        if get_setting("proxy_enabled", "0").strip() == "1":
+            proxy_server = get_setting("proxy_server", "").strip()
+            if proxy_server:
+                if "://" not in proxy_server:
+                    proxy_server = f"http://{proxy_server}"
+                proxy_config = {"server": proxy_server}
+                proxy_user = get_setting("proxy_username", "").strip()
+                proxy_pass = get_setting("proxy_password", "").strip()
+                if proxy_user:
+                    proxy_config["username"] = proxy_user
+                if proxy_pass:
+                    proxy_config["password"] = proxy_pass
+                logger.info(f"Using Thai Proxy for Browser: {proxy_server}")
+
+        context_kwargs = {
+            "viewport": {"width": 1440, "height": 900},
+            "user_agent": browser_config["user_agent"],
+            "extra_http_headers": browser_config["extra_http_headers"],
+            "locale": "th-TH",
+            "timezone_id": "Asia/Bangkok",
+            "geolocation": {"latitude": 13.7563, "longitude": 100.5018},
+            "permissions": ["geolocation"]
+        }
+        if proxy_config:
+            context_kwargs["proxy"] = proxy_config
+
+        context = await browser.new_context(**context_kwargs)
         await context.add_init_script(browser_config["js_override"])
         page = await context.new_page()
 

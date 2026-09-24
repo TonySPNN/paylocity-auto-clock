@@ -186,7 +186,11 @@ def init_db():
             "gemini_model": "gemini-1.5-flash",
             "ai_reply_enabled": "1",
             "ai_system_prompt": "คุณคือผู้ช่วย AI บริการลูกค้าของบริษัทที่คอยดูแลตอบแชททาง LINE Official Account ตอบคำถามลูกค้าด้วยภาษาไทยที่สุภาพ เป็นมิตร กระชับ ชัดเจน และเป็นธรรมชาติเหมือนพนักงานตอบเอง",
-            "browser_profile": "macos_sequoia"
+            "browser_profile": "macos_sequoia",
+            "proxy_enabled": "0",
+            "proxy_server": "",
+            "proxy_username": "",
+            "proxy_password": ""
         }
         
         for k, v in default_settings.items():
