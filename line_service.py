@@ -255,7 +255,7 @@ def send_line_image(image_url: str, preview_url: str = None) -> dict:
         logger.warning(f"Failed to push image to LINE: {e}")
         return {"success": False, "message": str(e)}
 
-def send_punch_notification(action: str, status: str, message: str,
+def send_punch_notification(action: str, status: str, message: str = "",
                             history_id: Optional[int] = None,
                             screenshot_filename: Optional[str] = None,
                             target_time: Optional[str] = None) -> dict:
@@ -276,6 +276,33 @@ def send_punch_notification(action: str, status: str, message: str,
         text = (
             f"🚀 [Paylocity] เริ่มกระบวนการลงเวลา {action_th} แล้ว!{target_line}\n"
             f"บอทกำลังเปิดหน้าเว็บ SSO และเตรียม Standby พร้อมกดในเวลาที่กำหนดครับ..."
+        )
+        return send_line_message(text)
+
+    if status == "duo_waiting":
+        text = (
+            f"🔔📱 [Paylocity] กรุณากด Approve ในแอป Duo ทันที!\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"บอทกรอกรหัส SSO เรียบร้อยแล้ว และส่งคำขอ Duo Push ไปยังโทรศัพท์ของคุณ\n\n"
+            f"👉 กรุณาเปิดแอป Duo Mobile บนมือถือ แล้วกด 'Approve / ติ๊กถูก' (หรือ 'Yes, this is my device')\n"
+            f"⏳ ระบบกำลังรอการอนุมัติ (มีเวลากด 120 วินาที)\n\n"
+            f"💡 ข้อสังเกต: หากในแอป Duo ขึ้นรีเควสมาจาก United States (US) สามารถกดยืนยันได้เลย เป็นรีเควสจากบอทของคุณเองครับ"
+        )
+        return send_line_message(text)
+
+    if status == "duo_reminder":
+        text = (
+            f"⏰ [Paylocity เตือนซ้ำ] ยังรอคุณกด Approve ในแอป Duo อยู่นะครับ!\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"👉 {message}\n"
+            f"กรุณาเปิดแอป Duo บนมือถือแล้วกด 'Approve' ตอนนี้เลย เพื่อไม่ให้ระบบหมดเวลาครับ"
+        )
+        return send_line_message(text)
+
+    if status == "duo_approved":
+        text = (
+            f"👍 [Paylocity] ตรวจพบการ Approve จาก Duo เรียบร้อยแล้ว!\n"
+            f"กำลังเข้าสู่หน้า Dashboard เพื่อเตรียมลงเวลา {action_th} ให้ตรงเวลาเป๊ะครับ..."
         )
         return send_line_message(text)
 

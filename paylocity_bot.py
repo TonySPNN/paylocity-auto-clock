@@ -556,9 +556,11 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
                 make_voice_call(action_text="เข้างาน" if action == "clock_in" else "ออกงาน")
 
             # ส่งข้อความเตือนให้กด Duo เข้า LINE ทันที
-            send_line_message(
-                f"🔔 [Paylocity] กรอกรหัส SSO เรียบร้อยแล้ว!\n"
-                f"👉 กรุณาเปิดแอป Duo บนมือถือของคุณ แล้วกด 'Approve / ติ๊กถูก' ได้เลยครับ (ระบบกำลังรออยู่)"
+            send_punch_notification(
+                action=action,
+                status="duo_waiting",
+                message="กรุณากด Approve ในแอป Duo บนโทรศัพท์ของคุณ",
+                history_id=history_id
             )
 
             # ตรวจสอบหาปุ่ม Send Push หรือจัดการ prompt ในเบื้องต้น (ทั้งหน้าหลักและทุก iframe)
@@ -574,11 +576,26 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
             start_wait = time.time()
             approved = False
             last_record_time = 0
+            sent_reminder = False
 
             while time.time() - start_wait < 120:
+                if is_cancel_requested():
+                    logger.info("Cancellation requested while waiting for Duo.")
+                    return {"success": False, "message": "ยกเลิกโดยผู้ใช้งาน"}
+
                 elapsed = int(time.time() - start_wait)
                 remain = max(0, 120 - elapsed)
                 current_url = page.url
+
+                # ส่งข้อความเตือนซ้ำใน LINE ถ้าผ่านไป 45 วินาทีแล้วยังไม่กด Approve
+                if elapsed >= 45 and not sent_reminder:
+                    sent_reminder = True
+                    send_punch_notification(
+                        action=action,
+                        status="duo_reminder",
+                        message=f"เหลือเวลาอีก {remain} วินาที",
+                        history_id=history_id
+                    )
 
                 # บันทึกความคืบหน้ารวมถึงนับเวลาถอยหลังและแคปเจอร์จอสดทุก 3 วินาที
                 if time.time() - last_record_time >= 3:
@@ -617,7 +634,12 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
                     logger.info(f"Duo approval detected! URL is {current_url}. Redirecting to Paylocity portal.")
                     await record_step(history_id, page, f"[สเต็ป 7/7] 👍 ตรวจพบการ Approve จาก Duo แล้ว! กำลังเข้าสู่หน้าหลักเพื่อลงเวลา {action_th}...", take_screenshot=True)
                     # แจ้งเตือนใน LINE ว่าได้รับ Approve แล้ว
-                    send_line_message(f"👍 [Paylocity] ตรวจพบการ Approve จาก Duo แล้ว!\nกำลังเข้าสู่หน้าหลักเพื่อกดลงเวลา {action_th}...")
+                    send_punch_notification(
+                        action=action,
+                        status="duo_approved",
+                        message="ตรวจพบการ Approve จาก Duo แล้ว",
+                        history_id=history_id
+                    )
                     break
                 await asyncio.sleep(2)
 
