@@ -267,6 +267,10 @@ async def handle_duo_prompts(page) -> bool:
         "button:has-text('Trust this browser')",
         "button:has-text('Trust browser')",
         "button:has-text('Trust this device')",
+        "button:has-text('เชื่อถือเบราว์เซอร์นี้')",
+        "button:has-text('ใช่ เชื่อถือเบราว์เซอร์')",
+        "button:has-text('ใช่ นี่คืออุปกรณ์ของฉัน')",
+        "button:has-text('เชื่อถือ')",
         "button#trust-browser-button",
         "button[data-testid='trust-browser-button']",
         "button:has-text('Trust')"
@@ -299,6 +303,8 @@ async def handle_duo_prompts(page) -> bool:
         "button:has-text('Send Me a Push')",
         "button:has-text('Duo Push')",
         "button:has-text('Send push')",
+        "button:has-text('ส่งการแจ้งเตือน')",
+        "button:has-text('ส่ง Duo Push')",
         "button.auth-button[type='submit']"
     ]
 
@@ -499,32 +505,51 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
             user_input = page.locator(
                 "input[type='email'], input#Username, input[name='Username'], input[name='loginfmt'], "
                 "input#identification, input[name='identifier'], input#i0116, "
-                "input[placeholder*='Email' i], input[placeholder*='Username' i], input[placeholder*='User' i]"
+                "input[placeholder*='Email' i], input[placeholder*='Username' i], input[placeholder*='User' i], "
+                "input[aria-label*='อีเมล' i], input[aria-label*='Email' i]"
             )
             try:
                 await user_input.first.wait_for(state="visible", timeout=15000)
                 logger.info(f"Filling Email: {username}")
                 await record_step(history_id, page, f"[สเต็ป 4/7] กำลังกรอก Email บริษัท ({username})...", take_screenshot=True)
                 await user_input.first.fill(username)
+                await user_input.first.dispatch_event("input")
+                await user_input.first.dispatch_event("change")
             except Exception:
                 logger.warning("Could not locate email input directly, searching again...")
 
             # ตรวจสอบว่าช่อง Password แสดงอยู่แล้วหรือไม่
-            pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd'], input#i0118")
+            pass_input = page.locator(
+                "input[type='password'], input#Password, input[name='Password'], input[name='password'], "
+                "input[name='passwd'], input#i0118, input[aria-label*='รหัสผ่าน' i]"
+            )
             pass_visible = await pass_input.count() > 0 and await pass_input.first.is_visible()
 
-            # หากเป็นระบบ Next ก่อนรหัสผ่าน (เช่น Microsoft / Okta)
+            # หากเป็นระบบ Next ก่อนรหัสผ่าน (เช่น Microsoft / Okta / Duo SSO)
             if not pass_visible:
-                next_btn = page.locator("button:has-text('Next'), input[value='Next'], button:has-text('Continue'), input#idSIButton9, button[type='submit']")
+                next_btn = page.locator(
+                    "button:has-text('ถัดไป'), button:has-text('Next'), button:has-text('Continue'), "
+                    "button:has-text('ดำเนินการต่อ'), input[value='ถัดไป'], input[value='Next'], "
+                    "button[type='submit'], input#idSIButton9"
+                )
                 if await next_btn.count() > 0 and await next_btn.first.is_visible():
-                    logger.info("Clicking Next to reveal password field...")
+                    logger.info("Clicking Next / ถัดไป to reveal password field...")
+                    await record_step(history_id, page, "[สเต็ป 4/7] พบคีย์ปุ่ม 'ถัดไป' กำลังคลิกเพื่อไปหน้ากรอกรหัสผ่าน...", take_screenshot=True)
                     await next_btn.first.click()
-                    await asyncio.sleep(2)
+                else:
+                    logger.info("Next button not found directly, pressing Enter...")
+                    await page.keyboard.press("Enter")
+                
+                # รอให้ระบบ Duo SSO เปลี่ยนหน้าไปที่หน้ากรอกรหัสผ่าน
+                await asyncio.sleep(2.5)
 
             # Step 5: กรอก Password
             logger.info("Step 5: Locating Password input field...")
-            pass_input = page.locator("input#Password, input[name='Password'], input[type='password'], input[name='passwd'], input#i0118")
-            await pass_input.first.wait_for(state="visible", timeout=15000)
+            pass_input = page.locator(
+                "input[type='password'], input#Password, input[name='Password'], input[name='password'], "
+                "input[name='passwd'], input#i0118, input[aria-label*='รหัสผ่าน' i]"
+            )
+            await pass_input.first.wait_for(state="visible", timeout=20000)
             
             # คลิกเพื่อโฟกัสที่ช่องรหัสผ่าน
             await pass_input.first.click()
@@ -541,21 +566,32 @@ async def run_punch(action: str = "clock_in", history_id: Optional[int] = None, 
             logger.info(f"Typing user real password (length: {len(real_pass)} chars)...")
             await record_step(history_id, page, f"[สเต็ป 5/7] กำลังป้อนรหัสผ่านจริงทีละตัวอักษร...", take_screenshot=False)
             await pass_input.first.press_sequentially(real_pass, delay=40)
+            await pass_input.first.dispatch_event("input")
+            await pass_input.first.dispatch_event("change")
             await asyncio.sleep(0.5)
 
-            # กดปุ่ม Login / Sign In
-            login_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Log In'), button:has-text('Sign In'), input[value='Login'], input[value='Sign in'], input#idSIButton9")
+            # กดปุ่ม Login / Sign In / เข้าสู่ระบบ
+            login_btn = page.locator(
+                "button:has-text('เข้าสู่ระบบ'), button:has-text('ลงชื่อเข้าใช้'), "
+                "button:has-text('Log In'), button:has-text('Sign In'), button:has-text('Submit'), "
+                "button[type='submit'], input[type='submit'], input[value='เข้าสู่ระบบ'], "
+                "input[value='Login'], input[value='Sign in'], input#idSIButton9"
+            )
             if await login_btn.count() > 0 and await login_btn.first.is_visible():
-                logger.info("Clicking Sign In button...")
-                await record_step(history_id, page, "[สเต็ป 5/7] กำลังกด Sign In เข้าสู่ระบบ...", take_screenshot=True)
+                logger.info("Clicking Sign In / เข้าสู่ระบบ button...")
+                await record_step(history_id, page, "[สเต็ป 5/7] กำลังกด 'เข้าสู่ระบบ'...", take_screenshot=True)
                 await login_btn.first.click()
             else:
+                logger.info("Sign in button not found, pressing Enter...")
                 await page.keyboard.press("Enter")
 
             await asyncio.sleep(3)
 
             # ตรวจสอบปุ่ม 'Stay signed in?' (ถ้ามี เช่น Microsoft SSO)
-            stay_signed_in = page.locator("input#idSIButton9[value='Yes'], button:has-text('Yes'), button:has-text('Stay signed in')")
+            stay_signed_in = page.locator(
+                "input#idSIButton9[value='Yes'], button:has-text('Yes'), button:has-text('Stay signed in'), "
+                "button:has-text('ใช่'), input[value='ใช่'], button:has-text('ใช่ ไม่ต้องแสดงอีก')"
+            )
             if await stay_signed_in.count() > 0 and await stay_signed_in.first.is_visible():
                 logger.info("Clicking 'Yes' on Stay signed in prompt...")
                 await record_step(history_id, page, "[สเต็ป 5/7] ตอบรับหน้าต่าง Stay signed in...", take_screenshot=True)
